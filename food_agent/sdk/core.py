@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 class FoodAgentSDK:
     def __init__(self, config: Optional[FoodAgentConfig] = None):
         self.config = config or FoodAgentConfig()
-        self.config.ensure_directories()
 
     def _load_catalog(self) -> List[Dict]:
         if not self.config.catalog_file.exists():
@@ -31,6 +30,7 @@ class FoodAgentSDK:
 
     def log_food(self, food_entries: List[dict], entry_date: Optional[str] = None) -> Dict[str, Any]:
         try:
+            self.config.ensure_directories()
             if entry_date:
                 try:
                     datetime.strptime(entry_date, "%Y-%m-%d")
@@ -206,6 +206,7 @@ class FoodAgentSDK:
 
     def add_to_catalog(self, food_item: Dict) -> Dict[str, Any]:
         try:
+            self.config.ensure_directories()
             catalog = self._load_catalog()
             name = food_item.get('food_name')
             if not name:
@@ -224,6 +225,7 @@ class FoodAgentSDK:
 
     def update_catalog_item(self, food_name: str, updates: Dict) -> Dict[str, Any]:
         try:
+            self.config.ensure_directories()
             catalog = self._load_catalog()
             found = False
             for i, item in enumerate(catalog):
@@ -254,6 +256,54 @@ class FoodAgentSDK:
             return {"success": True, "message": f"Removed '{food_name}' from catalog."}
         except Exception as e:
             logger.error(f"Error removing food from catalog: {e}")
+            return {"error": str(e)}
+
+    def revise_log_entry(self, old_food_name: str, updates: Dict, entry_date: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            self.config.ensure_directories()
+            if entry_date:
+                try:
+                    datetime.strptime(entry_date, "%Y-%m-%d")
+                    target_date = entry_date
+                except ValueError:
+                    return {"error": f"Invalid date format: {entry_date}. Use YYYY-MM-DD."}
+            else:
+                target_date = self.config.get_effective_today().isoformat()
+
+            filename = f"{target_date}_food-log.json"
+            file_path = self.config.daily_log_dir / filename
+            
+            if not file_path.exists():
+                return {"error": f"No logs found for {target_date}."}
+                
+            with open(file_path, 'r') as f:
+                items = json.load(f)
+            
+            updated_count = 0
+            for item in items:
+                # Check for exact match on food_name
+                if item.get('food_name') == old_food_name:
+                    # Recursive update for nested dictionaries to avoid overwriting entire sub-objects
+                    # if the user only provides partial updates.
+                    # However, standard dict.update() is shallow. 
+                    # For simplicity and consistency with other tools, we'll use shallow update 
+                    # but typically the agent provides full objects for 'standard_serving' etc.
+                    item.update(updates)
+                    updated_count += 1
+            
+            if updated_count == 0:
+                return {"error": f"No entry found with name '{old_food_name}' on {target_date}."}
+                
+            with open(file_path, 'w') as f:
+                json.dump(items, f, indent=2)
+                
+            return {
+                "success": True, 
+                "message": f"Updated {updated_count} entries for '{old_food_name}' on {target_date}.",
+                "date": target_date
+            }
+        except Exception as e:
+            logger.error(f"Error revising log entry: {e}")
             return {"error": str(e)}
 
     def set_data_folder(self, path: Optional[str]) -> Dict[str, Any]:

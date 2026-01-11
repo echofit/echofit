@@ -9,15 +9,18 @@
   },
   "context": {
     "includeDirectories": [
-      "/home/USER/ws/gemini-common-config"
+      "../gemini-common-config"
+    ],
+    "fileName": [
+      "README.md"
     ]
   },
   "mcpServers": {
     "food-agent": {
-      "command": "food-agent",
-      "args": [
-        "--stdio"
-      ]
+      "url": "https://food-agent-mcp-djxpmqqqzq-uc.a.run.app/messages/",
+      "headers": {
+        "Authorization": "Bearer VJ-MdP4AO1Ft9b8xfNygG9BDhC56lmplMX7eYKiuZc4"
+      }
     }
   }
 }

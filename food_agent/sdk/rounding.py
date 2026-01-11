@@ -40,7 +40,7 @@ class NutritionRounder:
         return float(round(val))
 
     @staticmethod
-    def round_cholesterol(val: float) -> float:
+    def round_cholesterol(val: float) -> int:
         """
         Cholesterol:
         < 2: 0
@@ -49,11 +49,11 @@ class NutritionRounder:
         > 5: nearest 5
         """
         if val < 2:
-            return 0.0
-        return float(round(val / 5) * 5)
+            return 0
+        return int(round(val / 5) * 5)
 
     @staticmethod
-    def round_sodium(val: float) -> float:
+    def round_sodium(val: float) -> int:
         """
         Sodium:
         < 5: 0
@@ -61,13 +61,13 @@ class NutritionRounder:
         > 140: nearest 10
         """
         if val < 5:
-            return 0.0
+            return 0
         if val <= 140:
-            return float(round(val / 5) * 5)
-        return float(round(val / 10) * 10)
+            return int(round(val / 5) * 5)
+        return int(round(val / 10) * 10)
     
     @staticmethod
-    def round_potassium(val: float) -> float:
+    def round_potassium(val: float) -> int:
         """
         Potassium:
         FDA 2016 rules: < 5 -> 0, 5-140 -> nearest 5, > 140 -> nearest 10.
@@ -75,7 +75,7 @@ class NutritionRounder:
         return NutritionRounder.round_sodium(val)
 
     @staticmethod
-    def round_carb_fiber_sugar_protein(val: float) -> float:
+    def round_carb_fiber_sugar_protein(val: float) -> int:
         """
         Total Carb, Fiber, Sugar, Protein:
         < 0.5: 0
@@ -84,8 +84,8 @@ class NutritionRounder:
         >= 1: nearest 1
         """
         if val < 0.5:
-            return 0.0
-        return float(round(val))
+            return 0
+        return int(round(val))
 
     @staticmethod
     def round_generic(val: float) -> float:

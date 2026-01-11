@@ -1,13 +1,12 @@
-.PHONY: install clean register
+.PHONY: install test clean
 
 install:
-	@echo "Installing food-agent in editable mode via pipx..."
-	pipx install -e . --force
+	@echo "Installing food-agent in editable mode..."
+	pip install -e .
 
-register:
-	@echo "Registering food-agent with Gemini CLI..."
-	# We use the installed 'food-agent' command
-	gemini mcp add food-agent food-agent --stdio
+test:
+	@echo "Running tests..."
+	export PYTHONPATH=. && pytest
 
 clean:
 	rm -rf build dist *.egg-info

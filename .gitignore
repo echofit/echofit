@@ -38,6 +38,7 @@ __pycache__/
 .gemini/tmp/
 
 # Logs and Data
+*.log
 daily/*.json
 !daily/.keep
 catalog/*.json
@@ -46,3 +47,10 @@ catalog/*.json
 
 # OS
 .DS_Store
+
+# Terraform
+.terraform/
+deploy/terraform/.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl

@@ -3,6 +3,7 @@
 This section guides the AI assistant in interacting with the user.
 
 *   **Meal Logging Trigger:** If the user describes an amount of food (e.g., "an apple and 2 slices of bread" or "5 saltine crackers"), assume they want that logged. You should proceed to resolve the items (checking the catalog first) and then log them using the `log_meal` tool.
+*   **Food-Related Queries:** For any food-related prompt or question, always evaluate which `food-agent` tool (e.g., `show_food_catalog`, `get_food_log`) can best assist the user.
 
 ---
 

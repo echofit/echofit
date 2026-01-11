@@ -15,7 +15,7 @@ setup(
     include_package_data=True,
     entry_points={
         "console_scripts": [
-            "food-agent=food_agent.mcp.server:run_server",
+            "food-agent=food_agent.cli.main:cli",
         ],
     },
     python_requires=">=3.10",

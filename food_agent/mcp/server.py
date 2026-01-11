@@ -3,11 +3,12 @@ from mcp.server.fastmcp import FastMCP
 from food_agent.sdk.core import FoodAgentSDK
 
 # Initialize MCP server in Stateless HTTP mode (Recommended for Production)
-mcp = FastMCP("food-agent", stateless_http=True, json_response=True, streamable_http_path="/")
+import os
+mcp_path = os.environ.get("MCP_PATH", "/")
+mcp = FastMCP("food-agent", stateless_http=True, json_response=True, streamable_http_path=mcp_path)
 
 # Configure Transport Security (DNS Rebinding Protection)
-import os
-allowed_hosts = os.environ.get("MCP_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
+allowed_hosts = os.environ.get("MCP_ALLOWED_HOSTS", "*").split(",")
 mcp.settings.transport_security.allowed_hosts = [h.strip() for h in allowed_hosts]
 mcp.settings.transport_security.enable_dns_rebinding_protection = False
 

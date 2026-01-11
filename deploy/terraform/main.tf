@@ -21,6 +21,11 @@ data "external" "project_info" {
   working_dir = "${path.module}/../../"
 }
 
+variable "deploy_timestamp" {
+  type    = string
+  default = "0"
+}
+
 locals {
   project_id  = data.external.project_info.result.project_id
   bucket_name = data.external.project_info.result.bucket_name != "" ? data.external.project_info.result.bucket_name : "food-agent-data-${data.external.project_info.result.project_id}"
@@ -62,10 +67,10 @@ resource "google_service_account" "admin_sa" {
 
 # --- 3. IAM Permissions ---
 
-# MCP needs Read access to Users list and Data
-resource "google_storage_bucket_iam_member" "mcp_reader" {
+# MCP needs Read/Write access to Users list and Data
+resource "google_storage_bucket_iam_member" "mcp_writer" {
   bucket = google_storage_bucket.data_bucket.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.mcp_sa.email}"
 }
 
@@ -86,11 +91,11 @@ locals {
   common_env = [
     {
       name  = "FOOD_AGENT_DATA"
-      value = "/mnt/gcs/data"
+      value = "/mnt/gcs"
     },
     {
       name  = "FOOD_AGENT_CONFIG"
-      value = "/mnt/gcs/config"
+      value = "/mnt/gcs"
     },
     {
       name  = "USERS_BUCKET_NAME"

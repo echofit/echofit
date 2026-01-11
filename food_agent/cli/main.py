@@ -5,7 +5,7 @@ import subprocess
 import os
 import requests
 from pathlib import Path
-from food_agent.cli import cloud
+from food_agent.cli import cloud as cloud_util
 
 @click.group()
 def cli():
@@ -21,11 +21,11 @@ def config():
 
 @config.command("init")
 @click.option("--project-id", help="Explicit Google Cloud Project ID")
-@click.option("--bucket", help="Explicit GCS Bucket Name")
+@click.option("--bucket", help="Explicit Storage Bucket Name")
 @click.option("--label-value", default="default", help="Label value to search for (default: default)")
 def config_init(project_id, bucket, label_value):
     """Initialize deployment context (Project & Bucket)."""
-    current_user = cloud.get_current_gcloud_user()
+    current_user =cloud_util.get_current_gcloud_user()
     if not current_user:
         click.echo("Error: No active gcloud user found. Run 'gcloud auth login'.", err=True)
         sys.exit(1)
@@ -34,7 +34,7 @@ def config_init(project_id, bucket, label_value):
     if not project_id:
         click.echo(f"Discovering project (label: ai-food-log={label_value})...", err=True)
         try:
-            project_id = cloud.lookup_project_by_label(label_value=label_value, user_email=current_user)
+            project_id =cloud_util.lookup_project_by_label(label_value=label_value, user_email=current_user)
         except RuntimeError as e:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
@@ -46,7 +46,7 @@ def config_init(project_id, bucket, label_value):
     if not bucket:
         click.echo(f"Discovering bucket (label: ai-food-log={label_value})...", err=True)
         try:
-            bucket = cloud.lookup_bucket_by_label(label_value=label_value, project_id=project_id)
+            bucket =cloud_util.lookup_bucket_by_label(label_value=label_value, project_id=project_id)
         except RuntimeError as e:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
@@ -61,16 +61,16 @@ def config_init(project_id, bucket, label_value):
         "bucket_name": bucket,
         "label_value": label_value
     }
-    path = cloud.save_deploy_context(data)
+    path =cloud_util.save_deploy_context(data)
     click.echo(f"Configuration saved to {path}", err=True)
     click.echo(json.dumps(data))
 
 @config.command("resolve")
 def config_resolve():
     """Resolve configuration for Terraform (JSON output)."""
-    current_user = cloud.get_current_gcloud_user()
+    current_user =cloud_util.get_current_gcloud_user()
     try:
-        data = cloud.load_deploy_context()
+        data =cloud_util.load_deploy_context()
         
         if data.get("gcloud_user") != current_user:
             click.echo(f"Error: Configuration mismatch. Configured for '{data.get('gcloud_user')}' but current user is '{current_user}'.", err=True)
@@ -94,7 +94,7 @@ def admin():
 def get_admin_config():
     """Fetch Admin URL and Shared Secret from Cloud Run."""
     try:
-        ctx = cloud.load_deploy_context()
+        ctx =cloud_util.load_deploy_context()
         pid = ctx["project_id"]
         
         # Get full service description as JSON
@@ -209,32 +209,80 @@ def deploy(project_id):
     """Deploy the agent to Google Cloud."""
     if not project_id:
         try:
-            ctx = cloud.load_deploy_context()
+            ctx =cloud_util.load_deploy_context()
             project_id = ctx["project_id"]
         except Exception:
             click.echo("Error: Not initialized. Run 'food-agent config init'.", err=True)
             sys.exit(1)
 
     click.echo(f"Deploying to Project: {project_id}", err=True)
+    import time
+    tag = int(time.time())
     
     # 1.5 Configure Docker for GCR
     click.echo("--- Configuring Docker for GCR ---", err=True)
     run_cmd(["gcloud", "auth", "configure-docker", "gcr.io", "--quiet"])
     
     # 2. Build & Push Admin Service
-    admin_tag = f"gcr.io/{project_id}/food-agent-admin:latest"
-    run_cmd(["docker", "build", "-f", "deploy/admin/Dockerfile", "-t", admin_tag, "."])
+    admin_tag = f"gcr.io/{project_id}/food-agent-admin:{tag}"
+    run_cmd(["docker", "build", "-f", "deploy/admin/Dockerfile", "-t", admin_tag, "-t", f"gcr.io/{project_id}/food-agent-admin:latest", "."])
     run_cmd(["docker", "push", admin_tag])
+    run_cmd(["docker", "push", f"gcr.io/{project_id}/food-agent-admin:latest"])
 
-    mcp_tag = f"gcr.io/{project_id}/food-agent-mcp:latest"
-    run_cmd(["docker", "build", "-f", "deploy/mcp/Dockerfile", "-t", mcp_tag, "."])
+    mcp_tag = f"gcr.io/{project_id}/food-agent-mcp:{tag}"
+    run_cmd(["docker", "build", "-f", "deploy/mcp/Dockerfile", "-t", mcp_tag, "-t", f"gcr.io/{project_id}/food-agent-mcp:latest", "."])
     run_cmd(["docker", "push", mcp_tag])
+    run_cmd(["docker", "push", f"gcr.io/{project_id}/food-agent-mcp:latest"])
 
-    # Terraform
+    # Terraform (Infrastructure only)
     tf_dir = Path("deploy/terraform").resolve()
     run_cmd(["terraform", "init"], cwd=tf_dir)
     run_cmd(["terraform", "apply", "-auto-approve"], cwd=tf_dir)
+
+    # Force Service Update with latest image
+    click.echo("--- Updating Cloud Run Services ---", err=True)
+    run_cmd([
+        "gcloud", "run", "services", "update", "food-agent-admin",
+        "--image", f"gcr.io/{project_id}/food-agent-admin:latest",
+        "--project", project_id, "--region", "us-central1"
+    ])
+    run_cmd([
+        "gcloud", "run", "services", "update", "food-agent-mcp",
+        "--image", f"gcr.io/{project_id}/food-agent-mcp:latest",
+        "--project", project_id, "--region", "us-central1"
+    ])
     click.echo("Deployment Complete.", err=True)
+
+@cli.group()
+def cloud():
+    """Cloud operations."""
+    pass
+
+@cloud.command("set-env")
+@click.argument("service")
+@click.option("--name", required=True, help="Environment variable name")
+@click.option("--value", required=True, help="Environment variable value")
+@click.option("--project-id", help="Override Project ID")
+@click.option("--region", default="us-central1", help="Cloud Run region")
+def cloud_set_env(service, name, value, project_id, region):
+    """Update environment variables for a Cloud Run service."""
+    if not project_id:
+        try:
+            ctx = cloud_util.load_deploy_context()
+            project_id = ctx["project_id"]
+        except Exception:
+            click.echo("Error: Not initialized. Run 'food-agent config init'.", err=True)
+            sys.exit(1)
+
+    cmd = [
+        "gcloud", "run", "services", "update", service,
+        "--update-env-vars", f"{name}={value}",
+        "--project", project_id,
+        "--region", region,
+        "--quiet"
+    ]
+    run_cmd(cmd)
+    click.echo(f"Updated {name}={value} on {service}.", err=True)
 
 if __name__ == "__main__":
     cli()

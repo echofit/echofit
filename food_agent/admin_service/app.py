@@ -11,7 +11,11 @@ from ..sdk.users import UserStore
 from ..sdk.config import get_app_data_base_dir
 
 # Setup Logging
-logging.basicConfig(level=logging.INFO)
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=log_level,
+    format="%(levelname)s: %(name)s: %(message)s"
+)
 logger = logging.getLogger("food_agent.admin")
 
 # Configuration
@@ -33,7 +37,8 @@ user_store = UserStore(data_dir=DATA_BASE_DIR)
 
 class SecretMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        if request.url.path == "/health":
+        # Health check bypass
+        if request.url.path in ["/health", "/"]:
             return await call_next(request)
         
         secret_header = request.headers.get("X-Admin-Secret")

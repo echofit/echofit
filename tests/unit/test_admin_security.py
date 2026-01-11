@@ -29,7 +29,7 @@ def test_middleware_rejects_missing_header():
             return JSONResponse({"data": "secret"})
 
         client = TestClient(app)
-        response = client.get("/")
+        response = client.get("/admin/users")
         assert response.status_code == 403
         assert response.json() == {"error": "Forbidden: Missing Authentication"}
 
@@ -53,7 +53,7 @@ def test_middleware_rejects_invalid_secret():
             return JSONResponse({"data": "secret"})
 
         client = TestClient(app)
-        response = client.get("/", headers={"X-Admin-Secret": "WrongSecret" * 4})
+        response = client.get("/admin/users", headers={"X-Admin-Secret": "WrongSecret" * 4})
         assert response.status_code == 403
         assert "Invalid Shared Secret" in response.json()["error"]
 

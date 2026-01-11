@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class UserStore:
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
-        # users.csv lives in the root of the data folder (base of FUSE mount)
+        # users.csv lives in the root of the data folder
         self.users_file = self.data_dir / "users.csv"
         self._cache: Dict[str, str] = {} # PAT -> email
 
@@ -43,14 +43,22 @@ class UserStore:
         return self._cache.get(pat)
 
     def add_user(self, pat: str, email: str):
-        """Append/Update user in the file."""
+        """Register/Update user. Ensures only one PAT exists per email."""
         self.refresh_cache()
+        
+        # 1. Remove any existing entries for this email
+        to_remove = [p for p, e in self._cache.items() if e == email]
+        for p in to_remove:
+            del self._cache[p]
+            
+        # 2. Add the new PAT
         self._cache[pat] = email
         
-        # Ensure dir exists (it's the base dir, so it should)
+        # Ensure dir exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         with open(self.users_file, "w", newline="") as f:
             writer = csv.writer(f)
             for p, e in self._cache.items():
                 writer.writerow([p, e])
+        logger.info(f"Updated user mapping: {email}")

@@ -11,7 +11,11 @@ from ..sdk.context import current_user_id
 from ..sdk.config import get_app_data_base_dir
 
 # Setup Logging
-logging.basicConfig(level=logging.INFO)
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=log_level,
+    format="%(levelname)s: %(name)s: %(message)s"
+)
 logger = logging.getLogger("food_agent.mcp_service")
 
 # Configuration

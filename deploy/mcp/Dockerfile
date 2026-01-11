@@ -8,7 +8,6 @@ COPY setup.py ./
 COPY food_agent/sdk/ ./food_agent/sdk/
 COPY food_agent/mcp/ ./food_agent/mcp/
 COPY food_agent/mcp_service/ ./food_agent/mcp_service/
-COPY food_agent/shared/ ./food_agent/shared/
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt

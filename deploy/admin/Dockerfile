@@ -7,7 +7,6 @@ COPY requirements.admin.txt ./requirements.txt
 COPY setup.py ./
 COPY food_agent/sdk/ ./food_agent/sdk/
 COPY food_agent/admin_service/ ./food_agent/admin_service/
-COPY food_agent/shared/ ./food_agent/shared/
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt

@@ -4,8 +4,13 @@ import json
 import subprocess
 import os
 import requests
+import yaml
 from pathlib import Path
+from urllib.parse import urlencode
+from rich.console import Console
+from rich.table import Table
 from food_agent.cli import cloud as cloud_util
+from food_agent.sdk.config import get_app_config_dir
 
 @click.group()
 def cli():
@@ -23,9 +28,30 @@ def config():
 @click.option("--project-id", help="Explicit Google Cloud Project ID")
 @click.option("--bucket", help="Explicit Storage Bucket Name")
 @click.option("--label-value", default="default", help="Label value to search for (default: default)")
-def config_init(project_id, bucket, label_value):
+@click.option("--overwrite", type=click.Choice(["prompt", "force", "fail"]), default="prompt",
+              help="Behavior when config exists: prompt (default), force, or fail")
+def config_init(project_id, bucket, label_value, overwrite):
     """Initialize deployment context (Project & Bucket)."""
-    current_user =cloud_util.get_current_gcloud_user()
+    # Check for existing config
+    config_path = get_app_config_dir() / "admin.yaml"
+    if config_path.exists():
+        try:
+            existing = cloud_util.load_admin_config()
+            if overwrite == "fail":
+                click.echo(f"Error: Config already exists at {config_path}. Use --overwrite=force to replace.", err=True)
+                sys.exit(1)
+            elif overwrite == "prompt":
+                click.echo(f"Existing configuration found at {config_path}:", err=True)
+                click.echo(f"  project_id: {existing.get('project_id')}", err=True)
+                click.echo(f"  bucket_name: {existing.get('bucket_name')}", err=True)
+                click.echo(f"  gcloud_user: {existing.get('gcloud_user')}", err=True)
+                if not click.confirm("Overwrite?"):
+                    click.echo("Aborted.", err=True)
+                    sys.exit(1)
+        except Exception:
+            pass  # Config file exists but couldn't be read, proceed with init
+
+    current_user = cloud_util.get_current_gcloud_user()
     if not current_user:
         click.echo("Error: No active gcloud user found. Run 'gcloud auth login'.", err=True)
         sys.exit(1)
@@ -34,7 +60,7 @@ def config_init(project_id, bucket, label_value):
     if not project_id:
         click.echo(f"Discovering project (label: ai-food-log={label_value})...", err=True)
         try:
-            project_id =cloud_util.lookup_project_by_label(label_value=label_value, user_email=current_user)
+            project_id = cloud_util.lookup_project_by_label(label_value=label_value, user_email=current_user)
         except RuntimeError as e:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
@@ -46,7 +72,7 @@ def config_init(project_id, bucket, label_value):
     if not bucket:
         click.echo(f"Discovering bucket (label: ai-food-log={label_value})...", err=True)
         try:
-            bucket =cloud_util.lookup_bucket_by_label(label_value=label_value, project_id=project_id)
+            bucket = cloud_util.lookup_bucket_by_label(label_value=label_value, project_id=project_id)
         except RuntimeError as e:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
@@ -61,7 +87,7 @@ def config_init(project_id, bucket, label_value):
         "bucket_name": bucket,
         "label_value": label_value
     }
-    path =cloud_util.save_deploy_context(data)
+    path = cloud_util.save_admin_config(data)
     click.echo(f"Configuration saved to {path}", err=True)
     click.echo(json.dumps(data))
 
@@ -70,7 +96,7 @@ def config_resolve():
     """Resolve configuration for Terraform (JSON output)."""
     current_user =cloud_util.get_current_gcloud_user()
     try:
-        data =cloud_util.load_deploy_context()
+        data =cloud_util.load_admin_config()
         
         if data.get("gcloud_user") != current_user:
             click.echo(f"Error: Configuration mismatch. Configured for '{data.get('gcloud_user')}' but current user is '{current_user}'.", err=True)
@@ -88,13 +114,18 @@ def config_resolve():
 
 @cli.group()
 def admin():
-    """Administer the remote agent (Users/Tokens)."""
+    """Administrative operations (requires gcloud + admin service access)."""
+    pass
+
+@admin.group()
+def users():
+    """Manage users and tokens on the remote service."""
     pass
 
 def get_admin_config():
     """Fetch Admin URL and Shared Secret from Cloud Run."""
     try:
-        ctx =cloud_util.load_deploy_context()
+        ctx =cloud_util.load_admin_config()
         pid = ctx["project_id"]
         
         # Get full service description as JSON
@@ -132,12 +163,12 @@ def get_admin_config():
         click.echo(f"Error resolving admin config: {e}", err=True)
         sys.exit(1)
 
-@admin.command("register")
+@users.command("add")
 @click.argument("email")
 @click.option("--pat", help="Optional specific PAT to set")
 @click.option("--show-token", is_flag=True, help="Include the real PAT in output")
-def admin_register(email, pat, show_token):
-    """Register a new user and generate a PAT."""
+def users_add(email, pat, show_token):
+    """Add a new user and generate a PAT."""
     url, secret, oidc = get_admin_config()
     headers = {
         "Authorization": f"Bearer {oidc}",
@@ -155,10 +186,10 @@ def admin_register(email, pat, show_token):
         
     click.echo(json.dumps(r.json(), indent=2))
 
-@admin.command("list")
+@users.command("list")
 @click.option("--email-filter", help="Filter by email substring")
 @click.option("--limit", default=50, show_default=True, help="Max results")
-def admin_list(email_filter, limit):
+def users_list(email_filter, limit):
     """List registered users (tokens always masked)."""
     url, secret, oidc = get_admin_config()
     headers = {"Authorization": f"Bearer {oidc}", "X-Admin-Secret": secret}
@@ -173,24 +204,215 @@ def admin_list(email_filter, limit):
         
     click.echo(json.dumps(r.json(), indent=2))
 
-@admin.command("show")
+@users.command("show")
 @click.argument("email")
-@click.option("--show-token", is_flag=True, help="Reveal the real PAT (NOT SUPPORTED BY API - will fail or mask)")
-def admin_show(email, show_token):
-    """Show details for a user. Note: Token is always masked by Server API."""
+@click.option("--show-token", is_flag=True, help="Reveal the real PAT in output")
+def users_show(email, show_token):
+    """Show details for a user."""
     url, secret, oidc = get_admin_config()
     headers = {"Authorization": f"Bearer {oidc}", "X-Admin-Secret": secret}
-    
-    r = requests.get(f"{url}/admin/users/{email}", headers=headers)
+
+    r = requests.get(f"{url}/admin/users/{email}", headers=headers, params={"show_token": show_token})
     if r.status_code != 200:
         click.echo(f"Error {r.status_code}: {r.text}", err=True)
         sys.exit(1)
-        
-    data = r.json()
-    if show_token:
-        click.echo("Warning: Server API does not expose tokens on lookup for security. Use 'register' to rotate/view.", err=True)
-        
-    click.echo(json.dumps(data, indent=2))
+
+    click.echo(json.dumps(r.json(), indent=2))
+
+@users.command("export")
+@click.argument("email")
+def users_export(email):
+    """Export user config (url + PAT) as YAML for handoff to end user."""
+    # 1. Get MCP service URL from Cloud Run
+    try:
+        ctx = cloud_util.load_admin_config()
+        pid = ctx["project_id"]
+        res = subprocess.run(
+            ["gcloud", "run", "services", "describe", "food-agent-mcp", "--project", pid, "--format=value(status.url)", "--region", "us-central1"],
+            capture_output=True, text=True, check=True
+        )
+        mcp_url = res.stdout.strip().rstrip('/') + '/'
+    except Exception as e:
+        click.echo(f"Error discovering MCP URL: {e}", err=True)
+        sys.exit(1)
+
+    # 2. Get user's PAT via admin service
+    url, secret, oidc = get_admin_config()
+    headers = {"Authorization": f"Bearer {oidc}", "X-Admin-Secret": secret}
+    r = requests.get(f"{url}/admin/users/{email}", headers=headers, params={"show_token": True})
+    if r.status_code != 200:
+        click.echo(f"Error {r.status_code}: {r.text}", err=True)
+        sys.exit(1)
+
+    user_data = r.json()
+    pat = user_data.get("pat")
+    if not pat:
+        click.echo("Error: Could not retrieve PAT. Try 'admin users add' to rotate.", err=True)
+        sys.exit(1)
+
+    # 3. Output YAML to stdout
+    export_data = {"url": mcp_url, "pat": pat}
+    click.echo(yaml.dump(export_data, default_flow_style=False))
+
+# --- User Group (Local Config) ---
+
+def get_user_config_path() -> Path:
+    """Get path to local user config file."""
+    return get_app_config_dir() / "user.yaml"
+
+def load_user_config() -> dict:
+    """Load local user configuration."""
+    path = get_user_config_path()
+    if path.exists():
+        with open(path, "r") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+def save_user_config(data: dict):
+    """Save local user configuration."""
+    path = get_user_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+
+@cli.group()
+def user():
+    """Local user operations (no admin access required)."""
+    pass
+
+@user.command("set")
+@click.option("--url", required=True, help="MCP service URL")
+@click.option("--pat", required=True, help="Personal Access Token")
+def user_set(url, pat):
+    """Configure local user credentials."""
+    data = load_user_config()
+    data["url"] = url.rstrip("/") + "/"
+    data["pat"] = pat
+    save_user_config(data)
+    click.echo(f"Saved to {get_user_config_path()}")
+
+@user.command("show")
+@click.option("--format", "output_format", type=click.Choice(["rich", "json"]), default="rich",
+              help="Output format: rich (default) or json")
+def user_show(output_format):
+    """Show current local user configuration."""
+    data = load_user_config()
+    if not data:
+        click.echo("No user configured. Run 'food-agent user set' or 'food-agent user import'", err=True)
+        sys.exit(1)
+
+    url = data.get("url", "")
+    pat = data.get("pat", "")
+
+    # Build full URL with token query string
+    base_url = url.rstrip("/")
+    url_with_token = f"{base_url}/?token={pat}" if pat else base_url
+
+    if output_format == "json":
+        output = {
+            "url": url,
+            "pat_preview": pat[:8] + "..." if len(pat) > 8 else "***",
+            "url_with_token": url_with_token,
+            "config_path": str(get_user_config_path())
+        }
+        click.echo(json.dumps(output, indent=2))
+    else:
+        console = Console()
+        table = Table(title="Food Agent User Configuration", show_header=False, box=None)
+        table.add_column("Key", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white")
+
+        table.add_row("Config Path", str(get_user_config_path()))
+        table.add_row("Service URL", url)
+        table.add_row("PAT Preview", pat[:8] + "..." if len(pat) > 8 else "***")
+        table.add_row("", "")
+        table.add_row("URL-only Auth", url_with_token)
+
+        console.print(table)
+        console.print("\n[dim]Use URL-only Auth for clients that don't support headers (Claude.ai, etc.)[/dim]")
+
+@user.command("import")
+@click.option("--overwrite", type=click.Choice(["prompt", "force", "fail"]), default="prompt",
+              help="Behavior when config exists: prompt (default), force, or fail")
+def user_import(overwrite):
+    """Import user config from stdin (YAML with url + pat)."""
+    # Read YAML from stdin
+    try:
+        input_data = yaml.safe_load(sys.stdin)
+    except Exception as e:
+        click.echo(f"Error parsing YAML from stdin: {e}", err=True)
+        sys.exit(1)
+
+    if not input_data or not input_data.get("url") or not input_data.get("pat"):
+        click.echo("Error: Input must contain 'url' and 'pat' fields.", err=True)
+        sys.exit(1)
+
+    new_data = {
+        "url": input_data["url"].rstrip("/") + "/",
+        "pat": input_data["pat"]
+    }
+
+    # Check existing config
+    existing = load_user_config()
+    if existing:
+        differs = existing.get("url") != new_data["url"] or existing.get("pat") != new_data["pat"]
+        if differs:
+            if overwrite == "fail":
+                click.echo("Error: Config already exists and differs. Use --overwrite=force to replace.", err=True)
+                sys.exit(1)
+            elif overwrite == "prompt":
+                click.echo("Existing configuration:", err=True)
+                click.echo(f"  url: {existing.get('url')}", err=True)
+                click.echo(f"  pat: {existing.get('pat', '')[:8]}...", err=True)
+                click.echo("New configuration:", err=True)
+                click.echo(f"  url: {new_data['url']}", err=True)
+                click.echo(f"  pat: {new_data['pat'][:8]}...", err=True)
+                if not click.confirm("Overwrite?"):
+                    click.echo("Aborted.", err=True)
+                    sys.exit(1)
+
+    save_user_config(new_data)
+    click.echo(f"Imported to {get_user_config_path()}")
+
+@user.group()
+def log():
+    """Food log operations."""
+    pass
+
+@log.command("show")
+@click.argument("date", required=False)
+def log_show(date):
+    """Show food log for a date (default: today)."""
+    config = load_user_config()
+    if not config.get("url") or not config.get("pat"):
+        click.echo("No user configured. Run 'food-agent user set --url <url> --pat <pat>'", err=True)
+        sys.exit(1)
+
+    headers = {
+        "Authorization": f"Bearer {config['pat']}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": 1,
+        "params": {
+            "name": "get_food_log",
+            "arguments": {"entry_date": date} if date else {}
+        }
+    }
+    r = requests.post(config["url"], json=payload, headers=headers)
+    if r.status_code != 200:
+        click.echo(f"Error {r.status_code}: {r.text}", err=True)
+        sys.exit(1)
+
+    result = r.json()
+    if "error" in result:
+        click.echo(f"Error: {result['error']}", err=True)
+        sys.exit(1)
+
+    click.echo(json.dumps(result.get("result", {}), indent=2))
 
 # --- Deployment ---
 
@@ -209,7 +431,7 @@ def deploy(project_id):
     """Deploy the agent to Google Cloud."""
     if not project_id:
         try:
-            ctx =cloud_util.load_deploy_context()
+            ctx =cloud_util.load_admin_config()
             project_id = ctx["project_id"]
         except Exception:
             click.echo("Error: Not initialized. Run 'food-agent config init'.", err=True)
@@ -268,7 +490,7 @@ def cloud_set_env(service, name, value, project_id, region):
     """Update environment variables for a Cloud Run service."""
     if not project_id:
         try:
-            ctx = cloud_util.load_deploy_context()
+            ctx = cloud_util.load_admin_config()
             project_id = ctx["project_id"]
         except Exception:
             click.echo("Error: Not initialized. Run 'food-agent config init'.", err=True)

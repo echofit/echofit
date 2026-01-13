@@ -57,10 +57,15 @@ class UserCreate(BaseModel):
     pat: Optional[str] = None
 
 class UserResponse(BaseModel):
+    model_config = {"json_schema_extra": {"exclude_none": True}}
     email: EmailStr
     pat_hash: str
     pat_length: int
     pat: Optional[str] = None
+
+    def model_dump(self, **kwargs):
+        kwargs.setdefault('exclude_none', True)
+        return super().model_dump(**kwargs)
 
 def mask_user(email: str, pat: str, show_token: bool = False) -> UserResponse:
     return UserResponse(
@@ -98,11 +103,11 @@ async def list_users(
     return results
 
 @app.get("/admin/users/{email}", response_model=UserResponse)
-async def get_user(email: str):
+async def get_user(email: str, show_token: bool = Query(False)):
     cache = user_store.refresh_cache()
     for pat, e in cache.items():
         if e == email:
-            return mask_user(e, pat)
+            return mask_user(e, pat, show_token=show_token)
     raise HTTPException(status_code=404, detail="User not found.")
 
 @app.get("/health")

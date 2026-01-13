@@ -2,6 +2,7 @@ import os
 import json
 import subprocess
 import sys
+import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any
 from food_agent.sdk.config import get_app_config_dir
@@ -55,23 +56,23 @@ def lookup_bucket_by_label(label_key: str = "ai-food-log", label_value: str = "d
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
-def save_deploy_context(data: Dict[str, Any]):
-    """Save the deployment context to disk."""
+def save_admin_config(data: Dict[str, Any]):
+    """Save the admin configuration to disk."""
     config_dir = get_app_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
-    context_file = config_dir / "deploy_context.json"
-    
-    with open(context_file, "w") as f:
-        json.dump(data, f, indent=2)
-    return context_file
+    config_file = config_dir / "admin.yaml"
 
-def load_deploy_context() -> Dict[str, Any]:
-    """Load the deployment context from disk."""
+    with open(config_file, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+    return config_file
+
+def load_admin_config() -> Dict[str, Any]:
+    """Load the admin configuration from disk."""
     config_dir = get_app_config_dir()
-    context_file = config_dir / "deploy_context.json"
-    
-    if not context_file.exists():
-        raise FileNotFoundError("Deployment context not initialized.")
-        
-    with open(context_file, "r") as f:
-        return json.load(f)
+    config_file = config_dir / "admin.yaml"
+
+    if not config_file.exists():
+        raise FileNotFoundError("Admin config not initialized. Run 'food-agent admin config init'.")
+
+    with open(config_file, "r") as f:
+        return yaml.safe_load(f) or {}

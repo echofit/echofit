@@ -8,6 +8,7 @@ setup(
     install_requires=[
         "mcp[cli]",
         "PyYAML",
+        "rich",
     ],
     package_data={
         "food_agent": ["app.yaml"],

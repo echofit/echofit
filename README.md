@@ -31,55 +31,97 @@ Restart your Gemini session (`gemini -r`) and verify:
 gemini mcp list
 ```
 
-## The Deployment Journey (Cloud Hosting)
+---
 
-We provide a professional-grade, free-tier eligible workflow to host your agent on Google Cloud using the **official recommended Stateless HTTP transport** for optimal scalability.
+## Cloud Deployment
 
-### Phase 1: Initialize Configuration
+The following sections document the cloud hosting workflow, organized by persona.
 
-Configure your deployment context by discovering (or specifying) your GCP project and storage bucket:
+### Admin Persona
+
+Admins deploy and manage the cloud infrastructure. Requires `gcloud` CLI and GCP project access.
+
+#### Initial Setup
 
 ```bash
+# 1. Initialize admin config (discovers GCP project/bucket)
 food-agent config init
-```
 
-This auto-discovers resources labeled `ai-food-log=default`, or prompts you to enter them manually. Configuration is saved to `~/.config/food-agent/deploy-context.json`.
-
-### Phase 2: Deploy to Cloud Run
-
-Deploy both services to Google Cloud:
-
-```bash
+# 2. Deploy services to Cloud Run
 food-agent deploy
 ```
 
-This builds Docker images, pushes to GCR, and runs Terraform to provision:
+Configuration is saved to `~/.config/food-agent/admin.yaml`.
 
-*   **Public Service:** `food-agent-mcp` (Authenticated via PAT).
-    *   **Transport:** Stateless HTTP (JSON-RPC over POST).
-    *   **Security:** DNS Rebinding protection configured via `MCP_ALLOWED_HOSTS`.
-*   **Private Service:** `food-agent-admin` (Authenticated via Google IAM).
+This provisions:
+*   **Public Service:** `food-agent-mcp` (Authenticated via PAT)
+*   **Private Service:** `food-agent-admin` (Authenticated via Google IAM)
 
-### Phase 3: Register Users
-
-Create user accounts and generate Personal Access Tokens (PATs):
+#### User Management
 
 ```bash
-# Register a user and get their PAT
-food-agent admin register user@example.com --show-token
+# Add a new user
+food-agent admin users add user@example.com --show-token
 
-# List all registered users
-food-agent admin list
+# List all users
+food-agent admin users list
 
-# Show details for a specific user
-food-agent admin show user@example.com
+# Show user details (with token)
+food-agent admin users show user@example.com --show-token
+
+# Export config for handoff to end user
+food-agent admin users export user@example.com > user-config.yaml
 ```
 
-The `--show-token` flag reveals the PAT on registration (it's masked by default for security).
+#### Admin-to-User Handoff
 
-### Phase 4: Connect Your Agent
+The `export` command generates a YAML file with the service URL and PAT that can be sent to the end user:
 
-Add the MCP server to your Gemini CLI settings (`~/.gemini/settings.json`):
+```bash
+# Admin exports config
+food-agent admin users export user@example.com > user-config.yaml
+
+# Send user-config.yaml to the user via email, Slack, etc.
+```
+
+---
+
+### User Persona
+
+End users consume the service. No `gcloud` or admin access required.
+
+#### Setup from Admin Handoff
+
+```bash
+# Import config received from admin (piped or redirected)
+cat user-config.yaml | food-agent user import
+
+# Or with overwrite behavior
+cat user-config.yaml | food-agent user import --overwrite=force
+cat user-config.yaml | food-agent user import --overwrite=fail
+```
+
+#### Manual Setup
+
+```bash
+# Configure credentials manually
+food-agent user set --url https://YOUR-SERVICE-URL.run.app/ --pat YOUR_PAT
+```
+
+#### Verify & Use
+
+```bash
+# Show current config
+food-agent user show
+
+# View food log
+food-agent user log show
+food-agent user log show 2025-01-10
+```
+
+#### Gemini CLI Integration
+
+Add to `~/.gemini/settings.json`:
 
 ```json
 {
@@ -94,17 +136,28 @@ Add the MCP server to your Gemini CLI settings (`~/.gemini/settings.json`):
 }
 ```
 
-For Claude.ai or other MCP clients that use URL-based auth:
+#### Claude.ai / Other MCP Clients
+
+Use URL-based auth:
 ```
 https://YOUR-SERVICE-URL.run.app/?token=YOUR_PAT
 ```
 
+---
+
 ## Configuration & Paths
 
-The tool follows a 3-tier fallback routine for resolving configuration and data paths:
-1.  **Primary:** Environment Variables (`FOOD_AGENT_CONFIG`, `FOOD_AGENT_DATA`).
-2.  **Secondary:** Bootstrap file (`~/.config/food-agent/settings.json`).
-3.  **Tertiary:** XDG Defaults (`~/.config/food-agent`, `~/.local/share/food-agent`).
+The tool follows XDG conventions for configuration and data paths:
+
+| File | Persona | Purpose |
+|------|---------|---------|
+| `~/.config/food-agent/admin.yaml` | Admin | GCP project, bucket, gcloud user |
+| `~/.config/food-agent/user.yaml` | User | Service URL and PAT |
+| `~/.local/share/food-agent/` | Both | Food log data |
+
+Override with environment variables:
+- `FOOD_AGENT_CONFIG` - Config directory
+- `FOOD_AGENT_DATA` - Data directory
 
 Refer to [docs/PATHS-DESIGN.md](docs/PATHS-DESIGN.md) for full architecture.
 

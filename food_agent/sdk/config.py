@@ -4,8 +4,14 @@ import logging
 import yaml
 from pathlib import Path
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, Any, Dict
 from .context import current_user_id
+
+DEFAULTS = {
+    "hours_offset": 4,
+    "timezone": "America/Chicago",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +90,8 @@ class FoodAgentConfig:
         self.schemas_dir = self.project_root / "schemas"
         self.settings_file = self.config_dir / "settings.json"
         self.app_config = self._load_app_config()
-        self.day_cutoff_hour = self.app_config.get("day_cutoff_hour", 0)
+        self.hours_offset = self.app_config.get("hours_offset", DEFAULTS["hours_offset"])
+        self.timezone = self.app_config.get("timezone", DEFAULTS["timezone"])
 
     @property
     def data_dir(self) -> Path:
@@ -113,10 +120,34 @@ class FoodAgentConfig:
         return {}
 
     def get_effective_today(self) -> date:
-        now = datetime.now()
-        if now.hour < self.day_cutoff_hour:
-            return (now - timedelta(days=1)).date()
-        return now.date()
+        """Determine the effective calendar date for food logging.
+
+        Uses the configured timezone (default: America/Chicago) and
+        hours_offset (default: 4). The offset shifts the day boundary
+        forward from midnight — e.g. with hours_offset=4, eating at
+        2 AM counts as the prior calendar day because the new day
+        doesn't start until 4 AM. A negative offset shifts the boundary
+        earlier (e.g. -2 means the next day starts at 10 PM).
+
+        The math: subtract hours_offset from the current time, then
+        take the date component.
+        """
+        tz = ZoneInfo(self.timezone)
+        now = datetime.now(tz)
+        adjusted = now - timedelta(hours=self.hours_offset)
+        return adjusted.date()
+
+    def get_settings(self) -> Dict[str, Any]:
+        """Return all effective settings (explicit config + defaults).
+
+        Always returns a value for every known setting, using the
+        configured value if present or the built-in default otherwise.
+        """
+        return {
+            "hours_offset": self.hours_offset,
+            "timezone": self.timezone,
+            "effective_date": self.get_effective_today().isoformat(),
+        }
 
     def ensure_directories(self):
         try:

@@ -2,6 +2,7 @@ import json
 import logging
 import fnmatch
 import re
+import uuid
 from pathlib import Path
 from datetime import date, datetime
 from typing import List, Dict, Optional, Any, Union
@@ -28,22 +29,20 @@ class FoodAgentSDK:
         with open(self.config.catalog_file, 'w') as f:
             json.dump(catalog, f, indent=2)
 
-    def log_food(self, food_entries: List[dict], entry_date: Optional[str] = None) -> Dict[str, Any]:
+    def log_food(self, food_entries: List[dict]) -> Dict[str, Any]:
         try:
             self.config.ensure_directories()
             logger.debug(f"Logging food to data_dir: {self.config.data_dir}")
-            if entry_date:
-                try:
-                    datetime.strptime(entry_date, "%Y-%m-%d")
-                    target_date = entry_date
-                except ValueError:
-                    return {"error": f"Invalid date format: {entry_date}. Use YYYY-MM-DD."}
-            else:
-                target_date = self.config.get_effective_today().isoformat()
-                
+            target_date = self.config.get_effective_today().isoformat()
+
+            # Assign a unique ID to each entry
+            for entry in food_entries:
+                if "id" not in entry:
+                    entry["id"] = uuid.uuid4().hex[:12]
+
             filename = f"{target_date}_food-log.json"
             file_path = self.config.daily_log_dir / filename
-            
+
             existing_entries = []
             if file_path.exists():
                 try:
@@ -53,12 +52,12 @@ class FoodAgentSDK:
                             existing_entries = json.loads(content)
                 except json.JSONDecodeError:
                     logger.warning(f"Could not decode existing file {file_path}. Starting fresh.")
-                    
+
             existing_entries.extend(food_entries)
-            
+
             with open(file_path, 'w') as f:
                 json.dump(existing_entries, f, indent=2)
-                
+
             return {
                 "success": True,
                 "date": target_date,
@@ -306,6 +305,84 @@ class FoodAgentSDK:
         except Exception as e:
             logger.error(f"Error revising log entry: {e}")
             return {"error": str(e)}
+
+    def move_log_entries(self, entry_ids: List[str], source_date: str, target_date: str) -> Dict[str, Any]:
+        """Move one or more food log entries from one date to another.
+
+        Entries are identified by their unique ID. They are removed from
+        the source date's log and appended to the target date's log.
+        """
+        try:
+            self.config.ensure_directories()
+            for d in [source_date, target_date]:
+                try:
+                    datetime.strptime(d, "%Y-%m-%d")
+                except ValueError:
+                    return {"error": f"Invalid date format: {d}. Use YYYY-MM-DD."}
+
+            if source_date == target_date:
+                return {"error": "Source and target dates must be different."}
+
+            source_file = self.config.daily_log_dir / f"{source_date}_food-log.json"
+            if not source_file.exists():
+                return {"error": f"No food log found for {source_date}."}
+
+            with open(source_file, 'r') as f:
+                source_items = json.load(f)
+
+            to_move = []
+            remaining = []
+            for item in source_items:
+                if item.get("id") in entry_ids:
+                    to_move.append(item)
+                else:
+                    remaining.append(item)
+
+            if not to_move:
+                return {"error": f"No entries with the given IDs found on {source_date}."}
+
+            missing_ids = set(entry_ids) - {item["id"] for item in to_move}
+            if missing_ids:
+                return {"error": f"Entry IDs not found on {source_date}: {', '.join(missing_ids)}"}
+
+            # Update source file
+            if remaining:
+                with open(source_file, 'w') as f:
+                    json.dump(remaining, f, indent=2)
+            else:
+                source_file.unlink()
+
+            # Append to target file
+            target_file = self.config.daily_log_dir / f"{target_date}_food-log.json"
+            target_items = []
+            if target_file.exists():
+                try:
+                    with open(target_file, 'r') as f:
+                        content = f.read()
+                        if content.strip():
+                            target_items = json.loads(content)
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not decode {target_file}. Starting fresh.")
+
+            target_items.extend(to_move)
+            with open(target_file, 'w') as f:
+                json.dump(target_items, f, indent=2)
+
+            moved_names = [item.get("food_name", "unknown") for item in to_move]
+            return {
+                "success": True,
+                "message": f"Moved {len(to_move)} entries from {source_date} to {target_date}.",
+                "moved_entries": moved_names,
+                "source_date": source_date,
+                "target_date": target_date,
+            }
+        except Exception as e:
+            logger.error(f"Error moving log entries: {e}")
+            return {"error": str(e)}
+
+    def get_settings(self) -> Dict[str, Any]:
+        """Return current effective configuration settings."""
+        return self.config.get_settings()
 
     def set_data_folder(self, path: Optional[str]) -> Dict[str, Any]:
         """

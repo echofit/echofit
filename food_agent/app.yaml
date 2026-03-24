@@ -1,1 +1,2 @@
-day_cutoff_hour: 4
+hours_offset: 4
+timezone: "America/Chicago"

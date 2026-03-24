@@ -4,6 +4,10 @@
   "items": {
     "type": "object",
     "properties": {
+      "id": {
+        "type": "string",
+        "description": "Unique identifier assigned by the server on write."
+      },
       "food_name": {
         "type": "string",
         "description": "A concise, standard name for the food item."

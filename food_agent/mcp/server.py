@@ -1,19 +1,26 @@
+import os
 from typing import List, Optional, Dict, Any, Union
+
 from mcp.server.fastmcp import FastMCP
+from app_user import create_app, FileSystemUserDataStore, DataStoreAuthAdapter
+
+from food_agent import APP_NAME
 from food_agent.sdk.core import FoodAgentSDK
 
-# Initialize MCP server in Stateless HTTP mode (Recommended for Production)
-import os
+# Initialize MCP server
 mcp_path = os.environ.get("MCP_PATH", "/")
-mcp = FastMCP("food-agent", stateless_http=True, json_response=True, streamable_http_path=mcp_path)
+mcp = FastMCP(APP_NAME, stateless_http=True, json_response=True, streamable_http_path=mcp_path)
 
-# Configure Transport Security (DNS Rebinding Protection)
-allowed_hosts = os.environ.get("MCP_ALLOWED_HOSTS", "*").split(",")
-mcp.settings.transport_security.allowed_hosts = [h.strip() for h in allowed_hosts]
+# DNS rebinding — disable for Cloud Run
 mcp.settings.transport_security.enable_dns_rebinding_protection = False
 
-# Initialize SDK
+# Data store and SDK
+store = FileSystemUserDataStore(app_name=APP_NAME)
+auth_store = DataStoreAuthAdapter(store)
 sdk = FoodAgentSDK()
+
+# HTTP mode — ASGI app with auth + admin
+app = create_app(store=auth_store, inner_app=mcp.streamable_http_app())
 
 
 @mcp.tool()

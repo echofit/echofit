@@ -1,6 +1,3 @@
-from contextvars import ContextVar
+from app_user.context import current_user_id
 
-# Stores the ID of the user performing the current operation.
-# Default is "default" for local stdio usage.
-# For authenticated remote usage, this will be set to the user's email or hash.
-current_user_id = ContextVar("current_user_id", default="default")
+__all__ = ["current_user_id"]

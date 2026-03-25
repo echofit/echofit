@@ -79,8 +79,7 @@ def get_app_data_dir() -> Path:
     if user == "default":
         return base
         
-    safe_user = "".join(c if c.isalnum() or c in "-_." else "_" for c in user)
-    return base / safe_user
+    return base / user.replace("@", "~")
 
 class FoodAgentConfig:
     def __init__(self):

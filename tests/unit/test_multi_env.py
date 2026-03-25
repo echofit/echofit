@@ -31,7 +31,7 @@ def test_load_single_user_data(mock_data_env):
 def test_load_multi_user_data(mock_data_env):
     """Verify data path for multi-user (cloud/authenticated) environment."""
     user_email = "test@example.com"
-    expected_folder = "test_example.com" # derived from sanitization logic (@ -> _)
+    expected_folder = "test~example.com"  # @ replaced with ~ for reversible encoding
     
     # Simulate authenticated context
     token = current_user_id.set(user_email)

@@ -48,9 +48,6 @@ catalog/*.json
 # OS
 .DS_Store
 
-# Terraform
-.terraform/
-deploy/terraform/.terraform/
-*.tfstate
-*.tfstate.backup
-.terraform.lock.hcl
+# Temp working directory
+temp/
+

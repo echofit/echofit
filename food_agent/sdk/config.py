@@ -54,6 +54,12 @@ def get_app_config_dir() -> Path:
 
 def get_app_data_base_dir() -> Path:
     """Resolve the Base Data Directory (where FUSE is mounted)."""
+    # APP_USERS_PATH is the standard env var set by gapp.yaml
+    users_path = os.environ.get("APP_USERS_PATH")
+    if users_path:
+        return Path(users_path).expanduser().resolve()
+
+    # Legacy env var
     env_path = os.environ.get("FOOD_AGENT_DATA")
     if env_path:
         return Path(env_path).expanduser().resolve()

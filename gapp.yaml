@@ -1,0 +1,11 @@
+service:
+  cmd: uvicorn food_agent.mcp.server:app --host 0.0.0.0 --port 8080
+
+public: true
+
+env:
+  - name: SIGNING_KEY
+    secret:
+      generate: true
+  - name: APP_USERS_PATH
+    value: "{{SOLUTION_DATA_PATH}}/users"

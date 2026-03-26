@@ -54,7 +54,15 @@ SIGNING_KEY=dev-key uvicorn food_agent.mcp.server:app
 
 ### Deploy with gapp
 
-[gapp](https://github.com/krisrowe/gapp) deploys to Google Cloud Run with infrastructure, secrets, and GCS FUSE data volumes.
+[gapp](https://github.com/krisrowe/gapp) deploys to Google Cloud Run with infrastructure, secrets, and GCS FUSE data volumes. The fastest way to get started is the gapp Claude Code plugin — ask **"help me deploy this app"** and it walks you through everything:
+
+```bash
+claude plugin marketplace add https://github.com/krisrowe/claude-plugins.git
+claude plugin marketplace update claude-plugins
+claude plugin install gapp@claude-plugins --scope user
+```
+
+Or use the CLI directly:
 
 ```bash
 gapp init
@@ -62,7 +70,7 @@ gapp setup <project-id>
 gapp deploy
 ```
 
-See gapp documentation for details on env var configuration and secrets management.
+See [gapp documentation](https://github.com/krisrowe/gapp) for details.
 
 ### Deploy without gapp
 

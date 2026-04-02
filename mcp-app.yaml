@@ -1,5 +1,5 @@
-name: food-agent
+name: echofit
 store: filesystem
 middleware:
   - user-identity
-tools: food_agent.mcp.tools
+tools: echofit_mcp.diet.tools

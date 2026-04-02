@@ -10,7 +10,7 @@ def get_mcp_config():
     try:
         # 1. Load local context
         res = subprocess.run(
-            ["python3", "-m", "food_agent.cli.main", "config", "resolve"],
+            ["python3", "-m", "echofit_cli.main", "config", "resolve"],
             capture_output=True, text=True, check=True
         )
         ctx = json.loads(res.stdout)
@@ -20,12 +20,12 @@ def get_mcp_config():
 
         # 2. Get service URL via gcloud
         res_svc = subprocess.run(
-            ["gcloud", "run", "services", "describe", "food-agent-mcp", 
+            ["gcloud", "run", "services", "describe", "echofit", 
              "--project", project_id, "--region", "us-central1", "--format=value(status.url)"],
             capture_output=True, text=True
         )
         if res_svc.returncode != 0:
-            return None, f"Failed to find food-agent-mcp service in {project_id}."
+            return None, f"Failed to find echofit service in {project_id}."
         
         url = res_svc.stdout.strip()
         return {"project_id": project_id, "url": url}, None
@@ -39,7 +39,7 @@ def get_tester_pat(project_id):
     # 1. Check if user already has a PAT in our local context or via list
     # (Since list masks it, we only know if they EXIST)
     res_list = subprocess.run(
-        ["python3", "-m", "food_agent.cli.main", "admin", "list", "--email-filter", tester_email],
+        ["python3", "-m", "echofit_cli.main", "admin", "list", "--email-filter", tester_email],
         capture_output=True, text=True, check=True
     )
     users = json.loads(res_list.stdout)
@@ -47,7 +47,7 @@ def get_tester_pat(project_id):
     # 2. If missing, register and return the new PAT
     if not users:
         res_reg = subprocess.run(
-            ["python3", "-m", "food_agent.cli.main", "admin", "register", tester_email, "--show-token"],
+            ["python3", "-m", "echofit_cli.main", "admin", "register", tester_email, "--show-token"],
             capture_output=True, text=True, check=True
         )
         user_data = json.loads(res_reg.stdout)
@@ -62,7 +62,7 @@ def get_tester_pat(project_id):
     # but it IS masked. So we must register to get a fresh one.
     # To fix the 'bloat', we need the ADMIN API to support REPLACING instead of APPENDING.
     res_reg = subprocess.run(
-        ["python3", "-m", "food_agent.cli.main", "admin", "register", tester_email, "--show-token"],
+        ["python3", "-m", "echofit_cli.main", "admin", "register", tester_email, "--show-token"],
         capture_output=True, text=True, check=True
     )
     user_data = json.loads(res_reg.stdout)

@@ -1,6 +1,0 @@
-mcp[cli]
-uvicorn
-starlette
-click
-requests
-rich

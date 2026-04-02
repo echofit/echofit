@@ -36,11 +36,11 @@ def test_mcp_stdio_get_food_log(staged_data):
     # Setup environment
     env = os.environ.copy()
     env["PYTHONPATH"] = os.getcwd()
-    env["FOOD_AGENT_DATA"] = str(staged_data)
+    env["ECHOFIT_DATA"] = str(staged_data)
     
     # Start the server process
     process = subprocess.Popen(
-        [sys.executable, "food_agent/mcp/server.py"],
+        [sys.executable, "-m", "mcp_app", "--config", "mcp-app.yaml"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

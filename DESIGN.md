@@ -37,5 +37,5 @@ To maximize accuracy for daily totals:
 3.  Apply FDA rounding rules to the `Daily Total` for the final response.
 
 ### 4. Implementation
-*   **Module:** `food_agent.sdk.rounding.NutritionRounder` implements the logic.
-*   **Integration:** `FoodAgentSDK.get_food_log` applies this rounder to the final output.
+*   **Module:** `echofit.diet.rounding.NutritionRounder` implements the logic.
+*   **Integration:** `DietSDK.get_food_log` applies this rounder to the final output.

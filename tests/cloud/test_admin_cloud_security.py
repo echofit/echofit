@@ -9,7 +9,7 @@ def get_admin_params():
     try:
         # 1. Get Project ID
         res = subprocess.run(
-            ["python3", "-m", "food_agent.cli.main", "config", "resolve"],
+            ["python3", "-m", "echofit_cli.main", "config", "resolve"],
             capture_output=True, text=True, check=True
         )
         ctx = json.loads(res.stdout)
@@ -17,7 +17,7 @@ def get_admin_params():
         
         # 2. Get Service URL and Shared Secret via gcloud
         res_svc = subprocess.run(
-            ["gcloud", "run", "services", "describe", "food-agent-admin", 
+            ["gcloud", "run", "services", "describe", "echofit-admin", 
              "--project", pid, "--region", "us-central1", "--format=json"],
             capture_output=True, text=True, check=True
         )

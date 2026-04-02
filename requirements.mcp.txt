@@ -1,4 +1,0 @@
-mcp[cli]
-uvicorn
-fastapi
-pydantic[email]

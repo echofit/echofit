@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echofit-mcp"
+version = "0.1.0"
+description = "EchoFit MCP server — AI tool interface for diet, workout, and health tracking"
+requires-python = ">=3.10"
+dependencies = [
+    "echofit-sdk",
+    "mcp[cli]",
+]
+
+[tool.setuptools.packages.find]
+include = ["echofit_mcp*"]

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echofit"
+version = "0.1.0"
+description = "EchoFit CLI — diet tracking, workout logging, and health monitoring"
+requires-python = ">=3.10"
+dependencies = [
+    "echofit-sdk",
+    "click",
+    "requests",
+    "rich",
+    "PyYAML",
+]
+
+[project.scripts]
+echofit = "echofit_cli.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["echofit_cli*"]

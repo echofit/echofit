@@ -1,16 +1,5 @@
 {
-  "tools": {
-    "allowed": [
-      "get_food_log",
-      "show_food_catalog",
-      "add_food_to_catalog",
-      "log_meal"
-    ]
-  },
   "context": {
-    "includeDirectories": [
-      "../gemini-common-config"
-    ],
     "fileName": [
       "README.md",
       "CONTRIBUTING.md"

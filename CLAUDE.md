@@ -1,2 +1,2 @@
-@import README.md
-@import CONTRIBUTING.md
+@README.md
+@CONTRIBUTING.md

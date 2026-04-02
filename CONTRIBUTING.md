@@ -48,6 +48,8 @@ EchoFit is organized into feature modules within the SDK. Each module has a para
 
 Modules do not import each other. They share `echofit.config` and `echofit.context` for user identity and data path resolution. Adding a module = add a subdir in `sdk/echofit/`, add a corresponding subdir in `mcp/echofit_mcp/`, optionally add CLI commands.
 
+Diet and workout share a **daily journal of entries** pattern — one log file per day, entries appended, same CRUD operations (log, revise, move between dates, filter). Where possible, shared infrastructure (date handling, entry ID generation, daily log file management) should be reused across these modules rather than duplicated. Health/vitals (e.g., blood pressure tracking) will have different data structures and access patterns — reads are more analytical (trends over time) and writes may not follow the daily-entries model. There is a need to be thoughtful about allowing for reuse and code consolidation at higher or lower levels in the user data model depending upon need. Three modules might share a common part of the echofit (or broader echomodel) user data storage framework, while only two of those three share a more specific element of a user data framework — e.g., logged entries in a journal that's typically viewed and managed in daily terms.
+
 All modules ship together in `echofit-sdk` — there are no per-module packages (no `echofit-diet`, `echofit-workout`). Module visibility is controlled at runtime via server config and JWT claims, not at install time. See the README for details on module configuration.
 
 ### SDK returns dicts

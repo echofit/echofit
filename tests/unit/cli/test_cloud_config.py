@@ -4,26 +4,26 @@ import yaml
 import pytest
 from click.testing import CliRunner
 from unittest.mock import patch, MagicMock
-from food_agent.cli.main import cli
+from echofit_cli.main import cli
 
 @pytest.fixture
 def temp_config_dir(tmp_path):
     """Set up a temporary config directory for testing."""
-    original_env = os.environ.get("FOOD_AGENT_CONFIG")
-    os.environ["FOOD_AGENT_CONFIG"] = str(tmp_path)
+    original_env = os.environ.get("ECHOFIT_CONFIG")
+    os.environ["ECHOFIT_CONFIG"] = str(tmp_path)
     yield tmp_path
     if original_env:
-        os.environ["FOOD_AGENT_CONFIG"] = original_env
+        os.environ["ECHOFIT_CONFIG"] = original_env
     else:
-        del os.environ["FOOD_AGENT_CONFIG"]
+        del os.environ["ECHOFIT_CONFIG"]
 
 def test_init_discovery_success(temp_config_dir):
     """Test 'init' with successful auto-discovery."""
     runner = CliRunner()
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user, \
-         patch("food_agent.cli.cloud.lookup_project_by_label") as mock_project, \
-         patch("food_agent.cli.cloud.lookup_bucket_by_label") as mock_bucket:
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user, \
+         patch("echofit_cli.cloud.lookup_project_by_label") as mock_project, \
+         patch("echofit_cli.cloud.lookup_bucket_by_label") as mock_bucket:
 
         mock_user.return_value = "user@example.com"
         mock_project.return_value = "discovered-project"
@@ -46,8 +46,8 @@ def test_init_discovery_fails_no_project(temp_config_dir):
     """Test 'init' fails when no project is found (and no interactive input)."""
     runner = CliRunner()
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user, \
-         patch("food_agent.cli.cloud.lookup_project_by_label") as mock_lookup:
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user, \
+         patch("echofit_cli.cloud.lookup_project_by_label") as mock_lookup:
 
         mock_user.return_value = "user@example.com"
         mock_lookup.return_value = None
@@ -61,7 +61,7 @@ def test_init_discovery_fails_multiple_projects(temp_config_dir):
     """Test 'init' fails when multiple projects match the label."""
     runner = CliRunner()
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user, \
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user, \
          patch("subprocess.run") as mock_run:
 
         mock_user.return_value = "user@example.com"
@@ -75,7 +75,7 @@ def test_init_discovery_passes_single_project(temp_config_dir):
     """Test 'init' succeeds when exactly one project is found."""
     runner = CliRunner()
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user, \
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user, \
          patch("subprocess.run") as mock_run:
 
         mock_user.return_value = "user@example.com"
@@ -105,7 +105,7 @@ def test_init_custom_label(temp_config_dir):
     """Test 'init' with a custom label value."""
     runner = CliRunner()
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user, \
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user, \
          patch("subprocess.run") as mock_run:
 
         mock_user.return_value = "user@example.com"
@@ -146,7 +146,7 @@ def test_resolve_success(temp_config_dir):
     with open(config_file, "w") as f:
         yaml.dump(config_data, f)
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user:
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user:
         mock_user.return_value = "user@example.com"
 
         result = runner.invoke(cli, ["config", "resolve"])
@@ -164,7 +164,7 @@ def test_resolve_user_mismatch_fails(temp_config_dir):
     with open(config_file, "w") as f:
         yaml.dump(config_data, f)
 
-    with patch("food_agent.cli.cloud.get_current_gcloud_user") as mock_user:
+    with patch("echofit_cli.cloud.get_current_gcloud_user") as mock_user:
         mock_user.return_value = "test@example.com"
 
         result = runner.invoke(cli, ["config", "resolve"])

@@ -2,16 +2,16 @@ import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch
-from food_agent.sdk.config import get_app_data_dir
-from food_agent.sdk.context import current_user_id
+from echofit.config import get_app_data_dir
+from echofit.context import current_user_id
 
 @pytest.fixture
 def mock_data_env(tmp_path):
-    """Set up a mock FOOD_AGENT_DATA environment variable."""
+    """Set up a mock ECHOFIT_DATA environment variable."""
     data_path = tmp_path / "data"
     data_path.mkdir()
     
-    with patch.dict(os.environ, {"FOOD_AGENT_DATA": str(data_path)}):
+    with patch.dict(os.environ, {"ECHOFIT_DATA": str(data_path)}):
         yield data_path
 
 def test_load_single_user_data(mock_data_env):

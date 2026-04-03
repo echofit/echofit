@@ -6,14 +6,14 @@ import uuid
 from pathlib import Path
 from datetime import date, datetime
 from typing import List, Dict, Optional, Any, Union
-from .config import FoodAgentConfig
+from echofit.config import EchoFitConfig
 from .rounding import NutritionRounder
 
 logger = logging.getLogger(__name__)
 
-class FoodAgentSDK:
-    def __init__(self, config: Optional[FoodAgentConfig] = None):
-        self.config = config or FoodAgentConfig()
+class DietSDK:
+    def __init__(self, config: Optional[EchoFitConfig] = None):
+        self.config = config or EchoFitConfig()
 
     def _load_catalog(self) -> List[Dict]:
         if not self.config.catalog_file.exists():

@@ -16,7 +16,7 @@ DEFAULTS = {
 logger = logging.getLogger(__name__)
 
 def _get_bootstrap_settings() -> Dict[str, Any]:
-    env_path = os.environ.get("FOOD_AGENT_SETTINGS")
+    env_path = os.environ.get("ECHOFIT_SETTINGS")
     if env_path:
         path = Path(env_path).expanduser().resolve()
     else:
@@ -25,7 +25,7 @@ def _get_bootstrap_settings() -> Dict[str, Any]:
             base = Path(xdg_config_home)
         else:
             base = Path.home() / ".config"
-        path = base / "food-agent" / "settings.json"
+        path = base / "echofit" / "settings.json"
 
     if path.exists():
         try:
@@ -37,7 +37,7 @@ def _get_bootstrap_settings() -> Dict[str, Any]:
     return {}
 
 def get_app_config_dir() -> Path:
-    env_path = os.environ.get("FOOD_AGENT_CONFIG")
+    env_path = os.environ.get("ECHOFIT_CONFIG")
     if env_path:
         return Path(env_path).expanduser().resolve()
 
@@ -50,7 +50,7 @@ def get_app_config_dir() -> Path:
         base_path = Path(xdg_config_home)
     else:
         base_path = Path.home() / ".config"
-    return base_path / "food-agent"
+    return base_path / "echofit"
 
 def get_app_data_base_dir() -> Path:
     """Resolve the Base Data Directory (where FUSE is mounted)."""
@@ -59,8 +59,7 @@ def get_app_data_base_dir() -> Path:
     if users_path:
         return Path(users_path).expanduser().resolve()
 
-    # Legacy env var
-    env_path = os.environ.get("FOOD_AGENT_DATA")
+    env_path = os.environ.get("ECHOFIT_DATA")
     if env_path:
         return Path(env_path).expanduser().resolve()
 
@@ -75,24 +74,22 @@ def get_app_data_base_dir() -> Path:
         base_path = Path(xdg_data_home)
     else:
         base_path = Path.home() / ".local" / "share"
-    return base_path / "food-agent"
+    return base_path / "echofit"
 
 def get_app_data_dir() -> Path:
     """Resolve the User-Scoped Data Directory."""
     base = get_app_data_base_dir()
     user = current_user_id.get()
-    
+
     if user == "default":
         return base
-        
+
     return base / user.replace("@", "~")
 
-class FoodAgentConfig:
+class EchoFitConfig:
     def __init__(self):
         self.config_dir = get_app_config_dir()
-        self.package_root = Path(__file__).parent.parent
-        self.project_root = self.package_root.parent
-        self.schemas_dir = self.project_root / "schemas"
+        self.package_root = Path(__file__).parent
         self.settings_file = self.config_dir / "settings.json"
         self.app_config = self._load_app_config()
         self.hours_offset = self.app_config.get("hours_offset", DEFAULTS["hours_offset"])
@@ -125,7 +122,7 @@ class FoodAgentConfig:
         return {}
 
     def get_effective_today(self) -> date:
-        """Determine the effective calendar date for food logging.
+        """Determine the effective calendar date for logging.
 
         Uses the configured timezone (default: America/Chicago) and
         hours_offset (default: 4). The offset shifts the day boundary

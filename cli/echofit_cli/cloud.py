@@ -5,7 +5,7 @@ import sys
 import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any
-from food_agent.sdk.config import get_app_config_dir
+from echofit.config import get_app_config_dir
 
 def get_current_gcloud_user() -> Optional[str]:
     """Get the active gcloud account email."""
@@ -20,7 +20,7 @@ def get_current_gcloud_user() -> Optional[str]:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
-def lookup_project_by_label(label_key: str = "ai-food-log", label_value: str = "default", user_email: Optional[str] = None) -> Optional[str]:
+def lookup_project_by_label(label_key: str = "echofit", label_value: str = "default", user_email: Optional[str] = None) -> Optional[str]:
     """Query GCP for a project with the specific label. Enforces exactly one match."""
     try:
         result = subprocess.run(
@@ -36,7 +36,7 @@ def lookup_project_by_label(label_key: str = "ai-food-log", label_value: str = "
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
-def lookup_bucket_by_label(label_key: str = "ai-food-log", label_value: str = "default", project_id: Optional[str] = None) -> Optional[str]:
+def lookup_bucket_by_label(label_key: str = "echofit", label_value: str = "default", project_id: Optional[str] = None) -> Optional[str]:
     """Query GCP for a storage bucket with the specific label. Enforces exactly one match."""
     try:
         cmd = ["gcloud", "storage", "buckets", "list", f"--filter=labels.{label_key}={label_value}", "--format=value(name)"]
@@ -72,7 +72,7 @@ def load_admin_config() -> Dict[str, Any]:
     config_file = config_dir / "admin.yaml"
 
     if not config_file.exists():
-        raise FileNotFoundError("Admin config not initialized. Run 'food-agent admin config init'.")
+        raise FileNotFoundError("Admin config not initialized. Run 'echofit admin config init'.")
 
     with open(config_file, "r") as f:
         return yaml.safe_load(f) or {}

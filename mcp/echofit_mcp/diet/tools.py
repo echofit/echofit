@@ -1,14 +1,14 @@
-"""Food agent MCP tools — pure async functions calling SDK.
+"""EchoFit Diet MCP tools — pure async functions calling SDK.
 
-Discovered by mcp-app framework from mcp-app.yaml tools: food_agent.mcp.tools
+Discovered by mcp-app framework from mcp-app.yaml tools: echofit_mcp.tools
 No framework imports. Docstrings become MCP tool descriptions.
 Type hints become tool schemas.
 """
 
 from typing import List, Optional, Dict, Any, Union
-from food_agent.sdk.core import FoodAgentSDK
+from echofit.diet import DietSDK
 
-sdk = FoodAgentSDK()
+sdk = DietSDK()
 
 
 async def log_meal(food_entries: List[dict]) -> dict[str, Any]:

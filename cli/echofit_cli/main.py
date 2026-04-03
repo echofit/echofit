@@ -9,12 +9,12 @@ from pathlib import Path
 from urllib.parse import urlencode
 from rich.console import Console
 from rich.table import Table
-from food_agent.cli import cloud as cloud_util
-from food_agent.sdk.config import get_app_config_dir
+from echofit_cli import cloud as cloud_util
+from echofit.config import get_app_config_dir
 
 @click.group()
 def cli():
-    """Food Agent Control Plane."""
+    """EchoFit Control Plane."""
     pass
 
 # --- Config Group ---
@@ -130,7 +130,7 @@ def get_admin_config():
         
         # Get full service description as JSON
         res = subprocess.run(
-            ["gcloud", "run", "services", "describe", "food-agent-admin", "--project", pid, "--format=json", "--region", "us-central1"],
+            ["gcloud", "run", "services", "describe", "echofit-admin", "--project", pid, "--format=json", "--region", "us-central1"],
             capture_output=True, text=True, check=True
         )
         service_data = json.loads(res.stdout)
@@ -228,7 +228,7 @@ def users_export(email):
         ctx = cloud_util.load_admin_config()
         pid = ctx["project_id"]
         res = subprocess.run(
-            ["gcloud", "run", "services", "describe", "food-agent-mcp", "--project", pid, "--format=value(status.url)", "--region", "us-central1"],
+            ["gcloud", "run", "services", "describe", "echofit-mcp", "--project", pid, "--format=value(status.url)", "--region", "us-central1"],
             capture_output=True, text=True, check=True
         )
         mcp_url = res.stdout.strip().rstrip('/') + '/'
@@ -298,7 +298,7 @@ def user_show(output_format):
     """Show current local user configuration."""
     data = load_user_config()
     if not data:
-        click.echo("No user configured. Run 'food-agent user set' or 'food-agent user import'", err=True)
+        click.echo("No user configured. Run 'echofit user set' or 'echofit user import'", err=True)
         sys.exit(1)
 
     url = data.get("url", "")
@@ -318,7 +318,7 @@ def user_show(output_format):
         click.echo(json.dumps(output, indent=2))
     else:
         console = Console()
-        table = Table(title="Food Agent User Configuration", show_header=False, box=None)
+        table = Table(title="EchoFit User Configuration", show_header=False, box=None)
         table.add_column("Key", style="cyan", no_wrap=True)
         table.add_column("Value", style="white")
 
@@ -385,7 +385,7 @@ def log_show(date):
     """Show food log for a date (default: today)."""
     config = load_user_config()
     if not config.get("url") or not config.get("pat"):
-        click.echo("No user configured. Run 'food-agent user set --url <url> --pat <pat>'", err=True)
+        click.echo("No user configured. Run 'echofit user set --url <url> --pat <pat>'", err=True)
         sys.exit(1)
 
     headers = {
@@ -434,7 +434,7 @@ def deploy(project_id):
             ctx =cloud_util.load_admin_config()
             project_id = ctx["project_id"]
         except Exception:
-            click.echo("Error: Not initialized. Run 'food-agent config init'.", err=True)
+            click.echo("Error: Not initialized. Run 'echofit config init'.", err=True)
             sys.exit(1)
 
     click.echo(f"Deploying to Project: {project_id}", err=True)
@@ -446,15 +446,15 @@ def deploy(project_id):
     run_cmd(["gcloud", "auth", "configure-docker", "gcr.io", "--quiet"])
     
     # 2. Build & Push Admin Service
-    admin_tag = f"gcr.io/{project_id}/food-agent-admin:{tag}"
-    run_cmd(["docker", "build", "-f", "deploy/admin/Dockerfile", "-t", admin_tag, "-t", f"gcr.io/{project_id}/food-agent-admin:latest", "."])
+    admin_tag = f"gcr.io/{project_id}/echofit-admin:{tag}"
+    run_cmd(["docker", "build", "-f", "deploy/admin/Dockerfile", "-t", admin_tag, "-t", f"gcr.io/{project_id}/echofit-admin:latest", "."])
     run_cmd(["docker", "push", admin_tag])
-    run_cmd(["docker", "push", f"gcr.io/{project_id}/food-agent-admin:latest"])
+    run_cmd(["docker", "push", f"gcr.io/{project_id}/echofit-admin:latest"])
 
-    mcp_tag = f"gcr.io/{project_id}/food-agent-mcp:{tag}"
-    run_cmd(["docker", "build", "-f", "deploy/mcp/Dockerfile", "-t", mcp_tag, "-t", f"gcr.io/{project_id}/food-agent-mcp:latest", "."])
+    mcp_tag = f"gcr.io/{project_id}/echofit-mcp:{tag}"
+    run_cmd(["docker", "build", "-f", "deploy/mcp/Dockerfile", "-t", mcp_tag, "-t", f"gcr.io/{project_id}/echofit-mcp:latest", "."])
     run_cmd(["docker", "push", mcp_tag])
-    run_cmd(["docker", "push", f"gcr.io/{project_id}/food-agent-mcp:latest"])
+    run_cmd(["docker", "push", f"gcr.io/{project_id}/echofit-mcp:latest"])
 
     # Terraform (Infrastructure only)
     tf_dir = Path("deploy/terraform").resolve()
@@ -464,13 +464,13 @@ def deploy(project_id):
     # Force Service Update with latest image
     click.echo("--- Updating Cloud Run Services ---", err=True)
     run_cmd([
-        "gcloud", "run", "services", "update", "food-agent-admin",
-        "--image", f"gcr.io/{project_id}/food-agent-admin:latest",
+        "gcloud", "run", "services", "update", "echofit-admin",
+        "--image", f"gcr.io/{project_id}/echofit-admin:latest",
         "--project", project_id, "--region", "us-central1"
     ])
     run_cmd([
-        "gcloud", "run", "services", "update", "food-agent-mcp",
-        "--image", f"gcr.io/{project_id}/food-agent-mcp:latest",
+        "gcloud", "run", "services", "update", "echofit-mcp",
+        "--image", f"gcr.io/{project_id}/echofit-mcp:latest",
         "--project", project_id, "--region", "us-central1"
     ])
     click.echo("Deployment Complete.", err=True)
@@ -493,7 +493,7 @@ def cloud_set_env(service, name, value, project_id, region):
             ctx = cloud_util.load_admin_config()
             project_id = ctx["project_id"]
         except Exception:
-            click.echo("Error: Not initialized. Run 'food-agent config init'.", err=True)
+            click.echo("Error: Not initialized. Run 'echofit config init'.", err=True)
             sys.exit(1)
 
     cmd = [

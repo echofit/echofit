@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from food_agent.sdk.config import FoodAgentConfig, DEFAULTS
-from food_agent.sdk.core import FoodAgentSDK
+from echofit.config import EchoFitConfig, DEFAULTS
+from echofit.diet import DietSDK
 
 
 @pytest.fixture
@@ -18,15 +18,15 @@ def tmp_env(tmp_path):
     data_dir.mkdir()
     config_dir.mkdir()
     with patch.dict(os.environ, {
-        "FOOD_AGENT_DATA": str(data_dir),
-        "FOOD_AGENT_CONFIG": str(config_dir),
+        "ECHOFIT_DATA": str(data_dir),
+        "ECHOFIT_CONFIG": str(config_dir),
     }):
         yield tmp_path
 
 
 @pytest.fixture
 def sdk(tmp_env):
-    return FoodAgentSDK()
+    return DietSDK()
 
 
 def _make_entry(name="Test Food"):
@@ -62,35 +62,35 @@ class TestEffectiveDate:
         """Eating at 2 PM Central yields today's date."""
         tz = ZoneInfo("America/Chicago")
         fake_now = datetime(2026, 3, 15, 14, 0, tzinfo=tz)
-        with patch("food_agent.sdk.config.datetime") as mock_dt:
+        with patch("echofit.config.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            config = FoodAgentConfig()
+            config = EchoFitConfig()
             assert config.get_effective_today().isoformat() == "2026-03-15"
 
     def test_2am_counts_as_prior_day(self, tmp_env):
         """Eating at 2 AM Central (before 4 AM offset) yields yesterday."""
         tz = ZoneInfo("America/Chicago")
         fake_now = datetime(2026, 3, 15, 2, 0, tzinfo=tz)
-        with patch("food_agent.sdk.config.datetime") as mock_dt:
+        with patch("echofit.config.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            config = FoodAgentConfig()
+            config = EchoFitConfig()
             assert config.get_effective_today().isoformat() == "2026-03-14"
 
     def test_exactly_4am_is_new_day(self, tmp_env):
         """Eating at exactly 4 AM Central starts the new day."""
         tz = ZoneInfo("America/Chicago")
         fake_now = datetime(2026, 3, 15, 4, 0, tzinfo=tz)
-        with patch("food_agent.sdk.config.datetime") as mock_dt:
+        with patch("echofit.config.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            config = FoodAgentConfig()
+            config = EchoFitConfig()
             assert config.get_effective_today().isoformat() == "2026-03-15"
 
     def test_defaults_used_when_app_yaml_missing(self, tmp_env):
         """Config falls back to DEFAULTS when app.yaml is absent."""
-        config = FoodAgentConfig()
+        config = EchoFitConfig()
         assert config.hours_offset == DEFAULTS["hours_offset"]
         assert config.timezone == DEFAULTS["timezone"]
 
@@ -196,10 +196,10 @@ class TestMoveLogEntries:
         # Log to target date first
         tz = ZoneInfo("America/Chicago")
         fake_now = datetime(2026, 1, 1, 12, 0, tzinfo=tz)
-        with patch("food_agent.sdk.config.datetime") as mock_dt:
+        with patch("echofit.config.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            sdk2 = FoodAgentSDK()
+            sdk2 = DietSDK()
             sdk2.log_food([_make_entry("Existing")])
 
         # Log to a different date and move to target

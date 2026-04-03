@@ -9,6 +9,7 @@ description = "EchoFit CLI — diet tracking, workout logging, and health monito
 requires-python = ">=3.10"
 dependencies = [
     "echofit-sdk",
+    "mcp-app @ git+https://github.com/krisrowe/mcp-app.git",
     "click",
     "requests",
     "rich",

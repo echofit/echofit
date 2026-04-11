@@ -1,39 +1,26 @@
-"""Subprocess tests for the real `echofit-admin` CLI in local mode.
+"""Local-revoke proving-ground test for the admin CLI.
 
-Why subprocess (and not in-process imports)?
-  These tests prove that the Click-based `echofit-admin` entry point
-  defined in `mcp/pyproject.toml` actually parses, imports, and runs.
-  An in-process import can't catch entry-point wiring regressions,
-  missing dependencies, or shadowed command names.
+Everything else that used to live in this file (connect, add, list,
+health, tokens-rejected) now belongs to `mcp_app.testing.iam.test_admin_local`,
+which the framework runs against echofit's `App` via
+`tests/framework/test_framework.py`. This file is what's left after
+that consolidation.
 
-Why pinned to `sys.executable.parent / "echofit-admin"` and not just
-"echofit-admin" on $PATH?
-  A developer may have `pipx install echofit-mcp` installed alongside
-  the editable checkout. pipx puts its own `echofit-admin` shim on
-  $PATH, and depending on shell init order it may resolve first. The
-  tests would then silently exercise the pipx copy — possibly a
-  stale release — and pass or fail based on code that isn't in this
-  working tree. Pinning to the venv's bin dir guarantees the command
-  is the one installed from `pip install -e mcp/` and therefore
-  points at the code under test. If that binary isn't present
-  (fresh clone, forgot `pip install -e mcp/`), the tests skip with
-  a clear message instead of silently running the wrong thing.
+Why this one test still lives in echofit:
+  `users revoke` is not yet verified by the mcp-app framework's
+  IAM tests. Echofit's revoke test is the only current signal
+  exercising `FileSystemUserDataStore.delete()`, and it's the test
+  that surfaces echomodel/mcp-app#10 (empty-dir-after-revoke bug).
+  Deleting it now would remove tracking of that upstream bug.
+  When mcp-app adds a revoke check and #10 is fixed, this file
+  should be deleted entirely.
 
-Why isolated HOME and XDG dirs in the test env?
-  `echofit-admin connect local` writes `setup.json` under
-  `~/.config/echofit/` (resolved via XDG_CONFIG_HOME → HOME fallback).
-  Without isolation the tests would pollute the developer's real
-  config dir and could also pick up prior state from earlier runs,
-  making test outcomes non-deterministic. `_env()` redirects every
-  writable path that any code in the stack might touch.
-
-Local mode means the admin CLI talks directly to the filesystem user
-store — no HTTP server, no tokens (tokens are remote-only). This
-covers the half of user management that the HTTP transport test
-doesn't: the local filesystem path.
+Why the subprocess + sys.executable.parent pinning pattern is still
+used here is documented in `CONTRIBUTING.md` and was originally
+written for this file before being generalized upstream — see
+`mcp_app.testing.fixtures` for the framework-level equivalent.
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -46,7 +33,6 @@ ECHOFIT_ADMIN = str(Path(sys.executable).parent / "echofit-admin")
 
 
 def _env(tmp_path: Path) -> dict:
-    """Isolated environment: all writable paths redirected to tmp_path."""
     env = os.environ.copy()
     env["APP_USERS_PATH"] = str(tmp_path / "users")
     env["ECHOFIT_DATA"] = str(tmp_path / "data")
@@ -58,7 +44,7 @@ def _env(tmp_path: Path) -> dict:
     return env
 
 
-def _run(args: list, env: dict, check: bool = True) -> subprocess.CompletedProcess:
+def _run(args: list, env: dict) -> subprocess.CompletedProcess:
     result = subprocess.run(
         [ECHOFIT_ADMIN, *args],
         env=env,
@@ -66,10 +52,9 @@ def _run(args: list, env: dict, check: bool = True) -> subprocess.CompletedProce
         text=True,
         timeout=15,
     )
-    if check and result.returncode != 0:
+    if result.returncode != 0:
         raise AssertionError(
-            f"echofit-admin {' '.join(args)} failed "
-            f"(exit {result.returncode}):\n"
+            f"echofit-admin {' '.join(args)} failed (exit {result.returncode}):\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
     return result
@@ -81,56 +66,34 @@ def _require_admin_binary():
         pytest.skip(f"echofit-admin not installed at {ECHOFIT_ADMIN}")
 
 
-def test_connect_local_then_add_list_and_revoke(tmp_path):
-    """Full local user management flow: connect, add two users, list, revoke one."""
+def test_revoke_removes_user_record_and_drops_from_list(tmp_path):
+    """Revoke in local mode deletes the auth record and the user
+    disappears from `users list`.
+
+    KNOWN UPSTREAM BUG — echomodel/mcp-app#10:
+      FileSystemUserDataStore.delete(user, "user") only unlinks
+      user.json; the empty user directory is left behind, and
+      list_users() walks directories, so revoked users still appear
+      in `users list`. This assertion is expected to FAIL until
+      mcp-app#10 is fixed and the dependency is bumped. Don't
+      accommodate the bug in the test — fix mcp-app.
+    """
     env = _env(tmp_path)
     users_dir = tmp_path / "users"
 
-    connect = _run(["connect", "local"], env)
-    assert "local" in connect.stdout.lower()
-
-    add_alice = _run(["users", "add", "alice@example.com"], env)
-    assert "Added: alice@example.com" in add_alice.stdout
-
-    add_bob = _run(["users", "add", "bob@example.com"], env)
-    assert "Added: bob@example.com" in add_bob.stdout
+    _run(["connect", "local"], env)
+    _run(["users", "add", "alice@example.com"], env)
+    _run(["users", "add", "bob@example.com"], env)
 
     assert (users_dir / "alice~example.com" / "user.json").exists()
-    assert (users_dir / "bob~example.com" / "user.json").exists()
-
-    listed = _run(["users", "list"], env)
-    assert "alice@example.com" in listed.stdout
-    assert "bob@example.com" in listed.stdout
-
-    health = _run(["health"], env)
-    assert "local" in health.stdout.lower()
 
     revoke = _run(["users", "revoke", "alice@example.com"], env)
     assert "Revoked: alice@example.com" in revoke.stdout
 
-    # Revoke should remove the user completely: auth record gone, and
-    # the user should not appear in `users list`. This is what a user
-    # of echofit-admin reasonably expects.
-    #
-    # KNOWN UPSTREAM BUG — echomodel/mcp-app#10:
-    #   FileSystemUserDataStore.delete(user, "user") only unlinks
-    #   user.json; the empty user directory is left behind, and
-    #   list_users() walks directories, so revoked users still appear
-    #   in `users list`. This assertion is expected to FAIL until
-    #   mcp-app#10 is fixed and the dependency is bumped. Don't
-    #   accommodate the bug in the test — fix mcp-app.
+    # Auth record gone — this part already passes.
     assert not (users_dir / "alice~example.com" / "user.json").exists()
 
+    # User disappears from `users list` — blocked on mcp-app#10.
     after = _run(["users", "list"], env)
     assert "bob@example.com" in after.stdout
     assert "alice@example.com" not in after.stdout
-
-
-def test_tokens_create_rejected_in_local_mode(tmp_path):
-    """Tokens are a remote-only concept; local mode should decline."""
-    env = _env(tmp_path)
-    _run(["connect", "local"], env)
-    _run(["users", "add", "alice@example.com"], env)
-
-    result = _run(["tokens", "create", "alice@example.com"], env, check=False)
-    assert "remote" in (result.stdout + result.stderr).lower()

@@ -162,9 +162,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, testing conventions, an
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e sdk/ -e mcp/ -e cli/
-python -m pytest tests/unit/ -v
+pip install -e sdk/ -e 'mcp/[test]' -e cli/
+python -m pytest
 ```
+
+The `[test]` extra pulls in `pytest`, `pytest-asyncio`, and `httpx` — required to run the free mission-critical tests that the mcp-app framework provides against this solution. See [CONTRIBUTING.md](CONTRIBUTING.md#testsframework--free-tests-from-mcp-app-that-verify-mission-critical-functionality) for what those tests verify.
 
 ### Dependencies
 

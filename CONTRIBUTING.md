@@ -20,13 +20,14 @@ All business logic lives in `sdk/echofit/`. MCP tools and CLI commands are thin 
 sdk/echofit/                   # echofit-sdk package
   __init__.py                  # APP_NAME constant
   config.py                    # Timezone, paths, XDG resolution, app config
-  context.py                   # User identity (re-exports from mcp-app)
+  context.py                   # User identity (re-exports current_user from mcp-app)
   app.yaml                     # Timezone and day boundary config
   diet/                        # Diet tracking module
     core.py                    # DietSDK — logging, catalog, entry management
     rounding.py                # FDA nutrition rounding
 
 mcp/echofit_mcp/               # echofit-mcp package
+  __init__.py                  # Constructs the App composition root (single export: `app`)
   diet/
     tools.py                   # MCP tool definitions — thin async wrappers
 
@@ -58,25 +59,25 @@ SDK methods return JSON-serializable dicts. Both MCP tools and CLI commands use 
 
 ### User identity and data path resolution
 
-User identity flows via `current_user_id` ContextVar (re-exported from `mcp_app.context`).
+User identity flows via `current_user` ContextVar (re-exported from `mcp_app.context`), which holds a `UserRecord` object with `.email` and `.profile` fields.
 
 **Two modes:**
 
-| Mode | Transport | `current_user_id` | Data path |
-|------|-----------|-------------------|-----------|
-| **Single-user (stdio)** | stdio | `"default"` | `~/.local/share/echofit/` |
+| Mode | Transport | `current_user.email` | Data path |
+|------|-----------|----------------------|-----------|
+| **Single-user (stdio)** | stdio | `"local"` (set via `--user local`) | `~/.local/share/echofit/` |
 | **Multi-user (HTTP)** | HTTP/SSE | Set from JWT `sub` claim by mcp-app middleware | `~/.local/share/echofit/{user}` (or `APP_USERS_PATH/{user}` in cloud) |
 
-In stdio mode, the user identity is `"default"` and data goes directly to the base data directory — no user subdirectory. In HTTP mode, mcp-app's user-identity middleware extracts the user from the JWT and sets `current_user_id`, which causes `get_app_data_dir()` to return a user-scoped subdirectory.
+In stdio mode, passing `--user local` (or any placeholder email) to `echofit-mcp stdio` sets `current_user` to a `UserRecord(email="local")`, and data goes directly to the base data directory — no user subdirectory. In HTTP mode, mcp-app's user-identity middleware validates the JWT, loads the full user record from the store in one read, and sets `current_user`, which causes `get_app_data_dir()` to return a user-scoped subdirectory.
 
-The SDK reads `current_user_id` — it never imports MCP or transport-layer code. This means all modules (diet, workout, etc.) get user-scoped data for free without knowing how the user was identified.
+The SDK reads `current_user.get().email` — it never imports MCP or transport-layer code. This means all modules (diet, workout, etc.) get user-scoped data for free without knowing how the user was identified.
 
 ## Adding Features
 
 1. **SDK first** — implement in `sdk/echofit/<module>/` (e.g., `sdk/echofit/workout/core.py`)
 2. **MCP tools** — add thin async wrappers in `mcp/echofit_mcp/<module>/tools.py`
 3. **CLI commands** (optional) — add a Click command group in `cli/echofit_cli/`
-4. **Tests** — add sociable unit tests in `tests/unit/sdk/`, transport tests in `tests/unit/mcp/` or `tests/unit/cli/`
+4. **Tests** — add sociable unit tests for the SDK method(s) in `tests/unit/sdk/`. If the tool references a new SDK method, the framework's `mcp_app.testing.tools.test_sdk_coverage_audit` will fail until a test references that method by name. Framework-owned concerns (auth, admin CLI, app wiring, HTTP health) are verified automatically by `tests/framework/` — do not duplicate them.
 
 ## Testing
 
@@ -88,31 +89,114 @@ Tests verify complete features or SDK transactions end-to-end. No mocks unless n
 
 ```
 tests/
-  unit/                        # Fast, offline, no credentials (DEFAULT)
-    sdk/                       # SDK business logic tests — the bulk of tests
-      test_diet_core.py
-      test_user_data_paths.py
-    mcp/                       # MCP transport tests (no network)
-      test_diet_tools.py
-    cli/                       # CLI transport tests
-      test_cloud_config.py
-  integration/                 # Requires running server (NEVER default)
-    test_mcp_stdio.py
+  framework/                   # Free tests against this echofit app sourced from the mcp-app
+                               # framework, verifying mission-critical operational functionality
+                               # (user auth, user admin, JWT enforcement) — 26 tests, DEFAULT
+    conftest.py                # Hands the framework your App object
+    test_framework.py          # Imports the subsystem test modules mcp-app ships
+  unit/                        # Echofit-specific tests (DEFAULT)
+    sdk/                       # Business logic — the bulk of echofit's tests
+      test_diet_core.py        # logging, timezone, day boundary, move entries
+      test_catalog.py          # catalog CRUD + revise_log_entry
+      test_user_data_paths.py  # XDG path resolution with current_user
+    mcp/                       # In-process MCP tool delegation tests
+      test_diet_tools.py       # thin-wrapper delegation + SDK-level data segregation
+      test_stdio_transport.py  # subprocess `echofit-mcp stdio` JSON-RPC over pipes
+    cli/                       # Echofit CLI tests
+      test_cloud_config.py     # echofit_cli gcloud config helpers
+      test_admin_cli_local.py  # proving-ground revoke test (tracks mcp-app#10)
+  integration/                 # Requires real subprocess + port (NEVER default)
+    test_echofit_mcp_serve.py  # subprocess `echofit-mcp serve` boot + remote admin CLI flow
   cloud/                       # Requires cloud deployment (NEVER default)
     test_in_cloud.py
     test_admin_cloud_security.py
 ```
 
-### What to test where
+### `tests/framework/` — free tests from mcp-app that verify mission-critical functionality
 
-**`tests/unit/sdk/`** — The bulk of all tests. Test SDK methods directly. Cover business logic, data persistence, date/timezone handling, catalog CRUD, entry management. These call SDK classes with `current_user_id` set manually and `ECHOFIT_DATA`/`ECHOFIT_CONFIG` pointed at temp dirs.
+Echofit's `tests/framework/` directory contains **free tests against this echofit app sourced from the mcp-app framework that verify mission-critical operational functionality** — the plumbing mcp-app itself owns and echofit depends on: user auth, user admin, JWT enforcement, admin CLI flows, app wiring, HTTP health, and SDK test-coverage discipline. These tests did not have to be written. They were imported. Twenty-six of them run on every `pytest` invocation, and if any one of them fails, something mission-critical in this solution is broken.
 
-**`tests/unit/mcp/`** — A small number of transport-level tests. These call MCP tool functions directly (they're just async functions — no server, no network). They prove:
-- Tool functions correctly delegate to SDK
-- User identity resolution works: set `current_user_id` to different values and verify data lands in the right directory
-- Single-user (`"default"`) vs multi-user (`"user@example.com"`) data path isolation
+**Why this exists at all:** the mcp-app framework provides user management, auth middleware, admin endpoints, and a CLI factory that every mcp-app solution inherits. Those features are mission-critical — if `POST /admin/users` silently stops registering users, or if an expired JWT stops returning 403, or if `echofit-admin connect local` stops writing `setup.json` correctly, echofit is broken in production even though no line of echofit code moved. Echofit alone can't detect those regressions by reading its own business logic tests. The framework has to verify its own features are actually wired up correctly in each solution that uses it. `tests/framework/` is how that verification happens for echofit specifically.
 
-**`tests/unit/cli/`** — CLI command tests using Click's `CliRunner`. No subprocess calls, no network. Test that commands parse arguments correctly and call the right SDK methods.
+**What each subsystem package verifies in plain terms:**
+
+- **`mcp_app.testing.iam`** — **identity and access management**. Three modules:
+  - `test_auth_enforcement` — your running HTTP server actually enforces auth. Missing token → 401. Unregistered user → 403. Expired token → 403. Non-admin scope on `/admin/users` → 403. Profile data round-trips through admin registration. **This is the group that catches an auth regression before it reaches production.**
+  - `test_admin_local` — your installed `echofit-admin` binary actually talks to the local filesystem user store via real subprocess. `connect local`, `users add`, `users list`, `health`, `tokens create` (rejected in local mode) all behave correctly end-to-end.
+  - `test_admin_errors` — misuse of `echofit-admin` fails loudly and informatively. `users add` without prior `connect` errors clearly. `connect <url>` without `--signing-key` errors. `health` without `connect` errors. If an error path stops erroring, users will quietly generate wrong state.
+- **`mcp_app.testing.wiring`** — **app and entry-point wiring**. `App.mcp_cli` and `App.admin_cli` are real Click groups with the expected subcommands. Every public MCP tool has a docstring and a return-type annotation (required for the MCP protocol). App name is set. If any of this drifts, the server won't boot and the MCP client won't see valid tool schemas.
+- **`mcp_app.testing.tools`** — **SDK test-coverage audit**. An AST-based auditor that walks every public async tool in `echofit_mcp.diet.tools`, finds every `sdk.<method>(...)` call site, and verifies each method name appears in at least one file under `tests/unit/sdk/`. If a new tool is added that calls a new SDK method without a corresponding unit test, this fails with a structured diagnostic listing the gap. Not fuzzy string matching: the tool-to-method mapping is built by AST walk; only the SDK-test presence check is a substring match, and SDK method names are distinct Python identifiers so collisions can't happen.
+- **`mcp_app.testing.health`** — **HTTP liveness**. Verifies `/health` returns 200 OK so Cloud Run (and any other liveness-check-driven platform) will keep the instance in rotation.
+
+**Do not rebuild any of this in `tests/unit/`.** If you catch yourself writing a test that duplicates one of these, delete it and trust the framework. If a framework test fails, read the assertion message and fix your implementation — never the imported test file.
+
+**`tests/unit/sdk/`** — The bulk of all tests. Test SDK methods directly. Cover business logic, data persistence, date/timezone handling, catalog CRUD, entry management. These call SDK classes with `current_user` set manually via `UserRecord(email=...)` and `ECHOFIT_DATA`/`ECHOFIT_CONFIG` pointed at temp dirs.
+
+**`tests/unit/mcp/`** — In-process MCP transport tests that cover things the framework tests don't. Today this includes `test_diet_tools.py` (thin-wrapper delegation + SDK-level per-user data segregation) and `test_stdio_transport.py` (subprocess stdio via JSON-RPC over pipes — mcp-app's framework tests cover HTTP but not stdio transport). If mcp-app later adds a stdio equivalent, delete the redundant bits.
+
+**`tests/unit/cli/`** — Echofit-specific CLI tests. Today: `test_cloud_config.py` (echofit's own gcloud config helpers, not mcp-app's admin CLI) and `test_admin_cli_local.py` (proving-ground subprocess test for `users revoke` in local mode, which tracks echomodel/mcp-app#10 and which the framework doesn't yet cover — delete this file when mcp-app adds its own revoke verification).
+
+### Adopting this pattern in a new mcp-app solution
+
+If you're building a new mcp-app solution and want the same free mission-critical test coverage, the adoption is five steps and ~25 lines of code:
+
+1. **Construct an `App` in your MCP package's `__init__.py`:**
+   ```python
+   from mcp_app import App
+   import my_app
+   from my_app_mcp.tools import tools as my_tools
+   app = App(name="my-app", tools_module=my_tools, sdk_package=my_app)
+   ```
+2. **Register the `mcp_app.apps` entry point in your `pyproject.toml`:**
+   ```toml
+   [project.scripts]
+   my-app-mcp = "my_app_mcp:app.mcp_cli"
+   my-app-admin = "my_app_mcp:app.admin_cli"
+
+   [project.entry-points."mcp_app.apps"]
+   my-app = "my_app_mcp:app"
+   ```
+3. **Create `tests/framework/conftest.py`:**
+   ```python
+   import pytest
+   from my_app_mcp import app as my_app
+
+   @pytest.fixture(scope="session")
+   def app():
+       return my_app
+   ```
+4. **Create `tests/framework/test_framework.py`:**
+   ```python
+   from mcp_app.testing.iam.test_auth_enforcement import *       # noqa
+   from mcp_app.testing.iam.test_admin_local import *            # noqa
+   from mcp_app.testing.iam.test_admin_errors import *           # noqa
+   from mcp_app.testing.wiring.test_app_wiring import *          # noqa
+   from mcp_app.testing.tools.test_sdk_coverage_audit import *   # noqa
+   from mcp_app.testing.health.test_health import *              # noqa
+   ```
+5. **Update `pytest.ini`:**
+   ```ini
+   [pytest]
+   testpaths = tests/unit tests/framework
+   asyncio_mode = strict
+   ```
+   Plus declare `pytest-asyncio` as a test dependency (the framework's HTTP auth-enforcement tests are async).
+
+After that, every `pytest` run executes the full set of mission-critical framework tests against your app. See `tests/framework/conftest.py` and `tests/framework/test_framework.py` in this repo for the actual working example.
+
+### Installing test dependencies
+
+The framework tests require `pytest-asyncio` (the HTTP ones are async). Install the test extras:
+
+```bash
+pip install -e 'mcp/[test]'
+```
+
+Or install it directly:
+
+```bash
+pip install pytest pytest-asyncio httpx
+```
 
 ### Testing user data isolation
 
@@ -129,21 +213,24 @@ def tmp_env(tmp_path):
 
 def test_multi_user_data_isolation(tmp_env):
     """Two users' data lands in separate directories."""
-    token = current_user_id.set("alice@example.com")
+    from mcp_app.models import UserRecord
+    from echofit.context import current_user
+
+    token = current_user.set(UserRecord(email="alice@example.com"))
     try:
         sdk = DietSDK()
         sdk.log_food([...])
         assert (tmp_env / "alice~example.com" / "daily").exists()
     finally:
-        current_user_id.reset(token)
+        current_user.reset(token)
 
-    token = current_user_id.set("bob@example.com")
+    token = current_user.set(UserRecord(email="bob@example.com"))
     try:
         sdk = DietSDK()
         sdk.log_food([...])
         assert (tmp_env / "bob~example.com" / "daily").exists()
     finally:
-        current_user_id.reset(token)
+        current_user.reset(token)
 
     # Alice's data is not in Bob's directory
     alice_files = list((tmp_env / "alice~example.com" / "daily").iterdir())
@@ -195,18 +282,18 @@ Also isolate every writable path the subprocess might touch — `HOME`, `XDG_CON
 ### Running tests
 
 ```bash
-python -m pytest tests/unit/ -v
+python -m pytest
 ```
 
-Integration tests (`tests/integration/`, `tests/cloud/`) are excluded from default runs and require real infrastructure.
+`pytest.ini` sets `testpaths = tests/unit tests/framework` and `asyncio_mode = strict`, so the default run covers both echofit's own tests and the free mission-critical tests imported from mcp-app. Integration tests (`tests/integration/`, `tests/cloud/`) are excluded from default runs and require real infrastructure.
 
 ## Multi-User Auth
 
 EchoFit uses [mcp-app](https://github.com/krisrowe/mcp-app) for server bootstrapping and user-identity middleware. In HTTP mode:
 
-- mcp-app's user-identity middleware extracts `current_user_id` from the JWT `sub` claim
+- mcp-app's user-identity middleware validates the JWT and loads the full user record (auth + profile) in one store read, setting the `current_user` ContextVar
 - `FileSystemUserDataStore` provides per-user directory storage
-- `create_app()` composes MCP + auth + admin into one ASGI app
+- `App.build_asgi()` composes MCP + auth + admin into one ASGI app
 - Admin endpoints live at `/admin` — only MCP tools are visible to end users
 
 ## Environment Variables
@@ -216,10 +303,9 @@ EchoFit uses [mcp-app](https://github.com/krisrowe/mcp-app) for server bootstrap
 | `ECHOFIT_DATA` | Base data directory | `~/.local/share/echofit/` |
 | `ECHOFIT_CONFIG` | Config directory | `~/.config/echofit/` |
 | `ECHOFIT_SETTINGS` | Bootstrap settings file | `~/.config/echofit/settings.json` |
-| `SIGNING_KEY` | JWT signing key (HTTP mode) | `dev-key` |
+| `SIGNING_KEY` | JWT signing key (HTTP mode) | required, no default |
 | `JWT_AUD` | Token audience validation | None (skip) |
-| `APP_USERS_PATH` | Per-user data directory (cloud) | `~/.local/share/echofit/users/` |
-| `MCP_PATH` | MCP endpoint path | `/` |
+| `APP_USERS_PATH` | Base data directory (checked before `ECHOFIT_DATA`; set in cloud deployments by gapp) | unset — `ECHOFIT_DATA` takes over |
 
 ## Code Conventions
 

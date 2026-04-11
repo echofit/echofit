@@ -13,9 +13,19 @@ dependencies = [
     "mcp[cli]",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+]
+
 [project.scripts]
-echofit-mcp = "echofit_mcp:mcp_cli"
-echofit-admin = "echofit_mcp:admin_cli"
+echofit-mcp = "echofit_mcp:app.mcp_cli"
+echofit-admin = "echofit_mcp:app.admin_cli"
+
+[project.entry-points."mcp_app.apps"]
+echofit = "echofit_mcp:app"
 
 [tool.setuptools.packages.find]
 include = ["echofit_mcp*"]

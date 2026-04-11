@@ -1,9 +1,13 @@
-from mcp_app.cli import create_admin_cli, create_mcp_cli
+from mcp_app import App
 
+import echofit
 from echofit import APP_NAME
 from echofit_mcp.diet import tools as diet_tools
 
-mcp_cli = create_mcp_cli(APP_NAME, tools_module=diet_tools)
-admin_cli = create_admin_cli(APP_NAME)
+app = App(
+    name=APP_NAME,
+    tools_module=diet_tools,
+    sdk_package=echofit,
+)
 
-__all__ = ["APP_NAME", "mcp_cli", "admin_cli"]
+__all__ = ["APP_NAME", "app"]

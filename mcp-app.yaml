@@ -1,5 +1,0 @@
-name: echofit
-store: filesystem
-middleware:
-  - user-identity
-tools: echofit_mcp.diet.tools

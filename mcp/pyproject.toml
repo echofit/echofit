@@ -13,5 +13,9 @@ dependencies = [
     "mcp[cli]",
 ]
 
+[project.scripts]
+echofit-mcp = "echofit_mcp:mcp_cli"
+echofit-admin = "echofit_mcp:admin_cli"
+
 [tool.setuptools.packages.find]
 include = ["echofit_mcp*"]

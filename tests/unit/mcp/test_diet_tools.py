@@ -11,7 +11,8 @@ import asyncio
 import pytest
 from pathlib import Path
 from unittest.mock import patch
-from echofit.context import current_user_id
+from mcp_app.models import UserRecord
+from echofit.context import current_user
 
 
 @pytest.fixture
@@ -69,43 +70,43 @@ class TestUserDataIsolation:
     def test_default_user_writes_to_base_dir(self, tmp_env):
         """Single-user (stdio) mode writes directly to base data dir."""
         from echofit_mcp.diet.tools import log_meal
-        token = current_user_id.set("default")
+        token = current_user.set(UserRecord(email="local"))
         try:
             asyncio.run(log_meal([_make_entry()]))
             assert (tmp_env / "daily").exists()
             assert len(list((tmp_env / "daily").iterdir())) == 1
         finally:
-            current_user_id.reset(token)
+            current_user.reset(token)
 
     def test_authenticated_user_writes_to_user_subdir(self, tmp_env):
         """Multi-user (HTTP) mode writes to user-scoped subdirectory."""
         from echofit_mcp.diet.tools import log_meal
-        token = current_user_id.set("alice@example.com")
+        token = current_user.set(UserRecord(email="alice@example.com"))
         try:
             asyncio.run(log_meal([_make_entry()]))
             user_dir = tmp_env / "alice~example.com"
             assert (user_dir / "daily").exists()
             assert len(list((user_dir / "daily").iterdir())) == 1
         finally:
-            current_user_id.reset(token)
+            current_user.reset(token)
 
     def test_two_users_data_isolated(self, tmp_env):
         """Two users' data lands in separate directories."""
         from echofit_mcp.diet.tools import log_meal
 
         # Alice logs
-        token = current_user_id.set("alice@example.com")
+        token = current_user.set(UserRecord(email="alice@example.com"))
         try:
             asyncio.run(log_meal([_make_entry("Alice Food")]))
         finally:
-            current_user_id.reset(token)
+            current_user.reset(token)
 
         # Bob logs
-        token = current_user_id.set("bob@example.com")
+        token = current_user.set(UserRecord(email="bob@example.com"))
         try:
             asyncio.run(log_meal([_make_entry("Bob Food")]))
         finally:
-            current_user_id.reset(token)
+            current_user.reset(token)
 
         # Each has their own dir with one log file
         alice_daily = tmp_env / "alice~example.com" / "daily"

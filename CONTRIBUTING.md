@@ -163,6 +163,35 @@ Describe scenario + outcome:
 - Good: `test_multi_user_data_lands_in_separate_directories`
 - Bad: `test_returns_true_when_file_exists`
 
+### Testing entry points without pipx interference
+
+Some tests shell out to the real installed CLIs (`echofit-admin`, `echofit-mcp`) to prove the `pyproject.toml` entry points, Click parsing, and module imports actually work. These tests **must not** rely on `$PATH` to find the binary.
+
+The reason: a developer may have `pipx install echofit-mcp` installed alongside the editable checkout. pipx places its own shims on `$PATH`, and depending on shell init order, those shims can resolve before the venv's bin dir. A test that calls bare `echofit-mcp` would then silently exercise the pipx copy — possibly a stale release — and pass or fail based on code that isn't in this working tree. The test appears to be verifying your changes, but isn't.
+
+**The rule:** subprocess-based CLI tests pin the command to the current interpreter's bin dir:
+
+```python
+import sys
+from pathlib import Path
+
+ECHOFIT_MCP = str(Path(sys.executable).parent / "echofit-mcp")
+ECHOFIT_ADMIN = str(Path(sys.executable).parent / "echofit-admin")
+```
+
+Because pytest runs under the venv's Python, `sys.executable.parent` is always the venv's `bin/` directory. The binary there was installed by `pip install -e mcp/`, so it resolves to the working-tree code via the editable install — never a pipx or system copy.
+
+If the binary isn't present (fresh clone that hasn't run `pip install -e mcp/`), the test should skip with a clear message rather than fall back to `$PATH`:
+
+```python
+@pytest.fixture(autouse=True)
+def _require_binary():
+    if not Path(ECHOFIT_MCP).exists():
+        pytest.skip(f"echofit-mcp not installed at {ECHOFIT_MCP}")
+```
+
+Also isolate every writable path the subprocess might touch — `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `APP_USERS_PATH`, `ECHOFIT_DATA`, `ECHOFIT_CONFIG`. Otherwise tests pollute the developer's real dotfiles and can read stale state from earlier runs. See `tests/unit/cli/test_admin_cli_local.py::_env` for the canonical fixture.
+
 ### Running tests
 
 ```bash

@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Any, Dict
-from .context import current_user_id
+from .context import current_user
 
 DEFAULTS = {
     "hours_offset": 4,
@@ -79,12 +79,13 @@ def get_app_data_base_dir() -> Path:
 def get_app_data_dir() -> Path:
     """Resolve the User-Scoped Data Directory."""
     base = get_app_data_base_dir()
-    user = current_user_id.get()
+    record = current_user.get(None)
+    email = record.email if record else "local"
 
-    if user == "default":
+    if email in ("local", "default"):
         return base
 
-    return base / user.replace("@", "~")
+    return base / email.replace("@", "~")
 
 class EchoFitConfig:
     def __init__(self):

@@ -47,12 +47,12 @@ pip install -e sdk/ -e mcp/
 
 **Claude Code:**
 ```bash
-claude mcp add echofit -- python -m mcp_app --config mcp-app.yaml
+claude mcp add echofit -- echofit-mcp stdio --user local
 ```
 
 **Gemini CLI:**
 ```bash
-gemini mcp add echofit -- python -m mcp_app --config mcp-app.yaml
+gemini mcp add echofit -- echofit-mcp stdio --user local
 ```
 
 ### Use
@@ -90,7 +90,27 @@ Any platform that runs Python ASGI apps works — Docker, Fly.io, Railway, etc. 
 
 ### User management
 
-After deployment, use the [app-user](https://github.com/krisrowe/app-user) CLI to register users and manage access. Admin operations go through `/admin` REST endpoints on the running server.
+The `echofit-mcp` package ships an `echofit-admin` CLI for registering users, issuing tokens, and checking service health. It talks to the `/admin` REST endpoints on the running server.
+
+```bash
+# Point the admin CLI at your deployment
+echofit-admin connect https://YOUR-SERVICE-URL --signing-key "$SIGNING_KEY"
+
+# Register a user and get their token
+echofit-admin users add alice@example.com
+echofit-admin tokens create alice@example.com
+
+# List / revoke
+echofit-admin users list
+echofit-admin users revoke alice@example.com
+
+# Health check
+echofit-admin health
+```
+
+The token printed by `tokens create` is what the end user puts in their MCP client config (see below).
+
+For local development against the filesystem store, use `echofit-admin connect local` instead of a URL.
 
 ### MCP client configuration
 

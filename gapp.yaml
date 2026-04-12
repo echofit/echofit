@@ -1,5 +1,8 @@
 public: true
 
+service:
+  cmd: echofit-mcp serve
+
 env:
   - name: SIGNING_KEY
     secret:

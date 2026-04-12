@@ -119,7 +119,7 @@ For local development against the filesystem store, use `echofit-admin connect l
 {
   "mcpServers": {
     "echofit": {
-      "url": "https://YOUR-SERVICE-URL/mcp",
+      "url": "https://YOUR-SERVICE-URL/",
       "headers": {
         "Authorization": "Bearer YOUR_TOKEN"
       }
@@ -130,7 +130,7 @@ For local development against the filesystem store, use `echofit-admin connect l
 
 **Claude.ai (query param):**
 ```
-https://YOUR-SERVICE-URL/mcp?token=YOUR_TOKEN
+https://YOUR-SERVICE-URL/?token=YOUR_TOKEN
 ```
 
 ## Configuration

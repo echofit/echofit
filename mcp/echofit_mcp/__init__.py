@@ -2,11 +2,11 @@ from mcp_app import App
 
 import echofit
 from echofit import APP_NAME
-from echofit_mcp.diet import tools as diet_tools
+from echofit_mcp import tools
 
 app = App(
     name=APP_NAME,
-    tools_module=diet_tools,
+    tools_module=tools,
     sdk_package=echofit,
 )
 

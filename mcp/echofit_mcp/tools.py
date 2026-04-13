@@ -3,7 +3,7 @@
 Workaround: mcp-app's App accepts a single tools_module, so this
 module re-exports all public async tool functions from each feature
 module. Remove this file if mcp-app adds multi-module support.
-See: https://github.com/echomodel/mcp-app/issues/TBD
+See: https://github.com/echomodel/mcp-app/issues/22
 """
 
 # Diet tools

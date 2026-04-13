@@ -9,7 +9,7 @@ EchoFit is organized into feature modules that can be enabled or disabled indepe
 | Module | Status | Description |
 |--------|--------|-------------|
 | **Diet** | Available | Daily food logging, nutrition catalog, calorie/macro/full nutrition tracking |
-| **Workout** | Planned | Exercise logging with set-level data, exercise catalog |
+| **Workout** | Available | Exercise logging with set-level data, exercise catalog |
 | **Health** | Planned | Vitals tracking (blood pressure, etc.) |
 
 Modules share a common config and user identity layer but do not depend on each other.
@@ -70,7 +70,6 @@ For remote access from Claude.ai, mobile, or multiple devices, deploy as an HTTP
 | `SIGNING_KEY` | Yes (HTTP) | `dev-key` | JWT signing key |
 | `JWT_AUD` | No | None (skip) | Token audience validation |
 | `APP_USERS_PATH` | No | `~/.local/share/echofit/users/` | Per-user data directory |
-| `MCP_PATH` | No | `/` | MCP endpoint path |
 
 ### Deploy with gapp
 

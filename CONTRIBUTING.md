@@ -25,11 +25,16 @@ sdk/echofit/                   # echofit-sdk package
   diet/                        # Diet tracking module
     core.py                    # DietSDK — logging, catalog, entry management
     rounding.py                # FDA nutrition rounding
+  workout/                     # Workout tracking module
+    core.py                    # WorkoutSDK — exercise catalog, workout logging
 
 mcp/echofit_mcp/               # echofit-mcp package
   __init__.py                  # Constructs the App composition root (single export: `app`)
+  tools.py                     # Aggregator — re-exports tools from all modules
   diet/
-    tools.py                   # MCP tool definitions — thin async wrappers
+    tools.py                   # Diet MCP tools — thin async wrappers
+  workout/
+    tools.py                   # Workout MCP tools — thin async wrappers
 
 cli/echofit_cli/               # echofit (CLI) package
   main.py                      # Click CLI commands
@@ -44,8 +49,8 @@ EchoFit is organized into feature modules within the SDK. Each module has a para
 
 - `echofit.diet` — diet/nutrition tracking (SDK)
 - `echofit_mcp.diet` — MCP tools for diet (thin wrappers)
-- `echofit.workout` — exercise logging (future)
-- `echofit_mcp.workout` — MCP tools for workout (future)
+- `echofit.workout` — exercise logging (SDK)
+- `echofit_mcp.workout` — MCP tools for workout (thin wrappers)
 
 Modules do not import each other. They share `echofit.config` and `echofit.context` for user identity and data path resolution. Adding a module = add a subdir in `sdk/echofit/`, add a corresponding subdir in `mcp/echofit_mcp/`, optionally add CLI commands.
 

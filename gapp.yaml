@@ -7,6 +7,7 @@ service:
 env:
   - name: SIGNING_KEY
     secret:
+      name: signing-key
       generate: true
   - name: APP_USERS_PATH
     value: "{{SOLUTION_DATA_PATH}}/users"

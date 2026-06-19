@@ -30,4 +30,5 @@ from echofit_mcp.workout.tools import (  # noqa: F401
     remove_exercise,
     revise_workout_entry,
     remove_workout_entry,
+    move_workout_entries,
 )

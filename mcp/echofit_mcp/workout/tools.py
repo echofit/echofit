@@ -27,16 +27,46 @@ async def log_workout(exercises: List[dict]) -> dict[str, Any]:
     return sdk.log_workout(exercises)
 
 
-async def get_workout_log(entry_date: Optional[str] = None) -> dict[str, Any]:
-    """Retrieve the workout log for a given date.
+async def get_workout_log(
+    limit: int = 5,
+    unit: str = "sessions",
+    exercise: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+) -> dict[str, Any]:
+    """Show the workout log, most recent first.
 
-    If no date is provided, returns the log for today (using the
-    configured timezone and day-boundary offset).
+    This always starts from the most recent workout that exists and walks
+    backward — it does not need and should not be given a specific date.
+    Use it for every "show my log" / "what have I been doing" / "my last N
+    <exercise>" question.
 
     Args:
-        entry_date: Optional date in YYYY-MM-DD format.
+        limit: How many most-recent results to return (default 5).
+        unit: "sessions" returns the most recent dates with data, each with
+            its entries grouped together. "entries" returns the most recent
+            individual entries (newest first), each tagged with its date —
+            use this for "my last 4 curls".
+        exercise: Optional exercise name to filter by (e.g. "Curls"). When
+            given, the result also includes a summary with the count and the
+            average/max weight and reps over the matched entries.
+        since: Optional inclusive start date (YYYY-MM-DD), e.g. for
+            "workouts in the last two weeks" (caller supplies the date).
+        until: Optional inclusive end date (YYYY-MM-DD). Pass the day before
+            the oldest result you've already seen to page further back.
+
+    Returns:
+        sessions or entries: The results, most recent first.
+        count: How many were returned.
+        has_more: Whether more results exist past this page.
+        scan_truncated: True if the search was capped before fully
+            satisfying the request — tell the user it only looked back
+            through 'scanned_through' and offer to look further.
+        scanned_through: The oldest month examined (YYYY-MM).
     """
-    return sdk.get_workout_log(entry_date)
+    return sdk.get_workout_log(
+        limit=limit, unit=unit, exercise=exercise, since=since, until=until
+    )
 
 
 async def list_exercises(
@@ -110,3 +140,26 @@ async def remove_workout_entry(
         entry_date: Optional date in YYYY-MM-DD format (defaults to today).
     """
     return sdk.remove_workout_entry(entry_id, entry_date)
+
+
+async def move_workout_entries(
+    entry_ids: List[str],
+    source_date: str,
+    target_date: str,
+) -> dict[str, Any]:
+    """Move one or more workout entries from one date to another.
+
+    Use this to correct the date of a logged workout — e.g. you logged
+    today but the workout actually happened yesterday. Entries are
+    identified by ID and moved to the target date; the entries on the
+    source date that you did not name are left untouched.
+
+    Returns the post-move total_entries for both the source and target
+    dates so you know the resulting state without re-reading.
+
+    Args:
+        entry_ids: IDs of the entries to move.
+        source_date: The date the entries are currently on (YYYY-MM-DD).
+        target_date: The date to move them to (YYYY-MM-DD).
+    """
+    return sdk.move_workout_entries(entry_ids, source_date, target_date)

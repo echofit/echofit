@@ -21,12 +21,13 @@ sdk/echofit/                   # echofit-sdk package
   __init__.py                  # APP_NAME constant
   config.py                    # Timezone, paths, XDG resolution, app config
   context.py                   # User identity (re-exports current_user from mcp-app)
+  journal.py                   # DailyJournal — month-sharded dated-entry storage + reverse cursor
   app.yaml                     # Timezone and day boundary config
   diet/                        # Diet tracking module
     core.py                    # DietSDK — logging, catalog, entry management
     rounding.py                # FDA nutrition rounding
   workout/                     # Workout tracking module
-    core.py                    # WorkoutSDK — exercise catalog, workout logging
+    core.py                    # WorkoutSDK — exercise catalog + workout log (via DailyJournal)
 
 mcp/echofit_mcp/               # echofit-mcp package
   __init__.py                  # Constructs the App composition root (single export: `app`)
@@ -54,7 +55,7 @@ EchoFit is organized into feature modules within the SDK. Each module has a para
 
 Modules do not import each other. They share `echofit.config` and `echofit.context` for user identity and data path resolution. Adding a module = add a subdir in `sdk/echofit/`, add a corresponding subdir in `mcp/echofit_mcp/`, optionally add CLI commands.
 
-Diet and workout share a **daily journal of entries** pattern — one log file per day, entries appended, same CRUD operations (log, revise, move between dates, filter). Where possible, shared infrastructure (date handling, entry ID generation, daily log file management) should be reused across these modules rather than duplicated. Health/vitals (e.g., blood pressure tracking) will have different data structures and access patterns — reads are more analytical (trends over time) and writes may not follow the daily-entries model. There is a need to be thoughtful about allowing for reuse and code consolidation at higher or lower levels in the user data model depending upon need. Three modules might share a common part of the echofit (or broader echomodel) user data storage framework, while only two of those three share a more specific element of a user data framework — e.g., logged entries in a journal that's typically viewed and managed in daily terms.
+Workout and diet share a **journal of dated entries** pattern — per-user, append-only adds, id-targeted revise/remove, and move between dates. The workout log is backed by `DailyJournal` (`sdk/echofit/journal.py`): entries are stored one JSON object per **month** (`workouts/YYYY-MM.json`, keyed by date), and all browsing reads go through a **clock-free reverse cursor** (`get_workout_log`) that discovers the most recent data and walks backward — by sessions or by individual entries, optionally filtered to one exercise with a computed summary. A `max_active_months` budget bounds worst-case I/O and reports when a scan was truncated. Month-sharding plus the cursor keep recency, range, and per-exercise history efficient on object-store backends (GCS-FUSE), where a directory listing scales with object count and every read is a round-trip: a small month listing plus one or two reads, instead of one file per date. The only full-shard writer is private, so adds can never clobber a day; edits/moves address entries by `id`; and every read/mutation echoes the resolved `date` and authoritative `total_entries` (both server-derived). Health/vitals (e.g., blood pressure tracking) will have different data structures and access patterns — reads are more analytical (trends over time) and writes may not follow the dated-entries model. Be thoughtful about where reuse lives: modules may share a common part of the user-data storage framework at one level while only a subset shares a more specific element — e.g., the dated-entry journal in `DailyJournal`.
 
 All modules ship together in `echofit-sdk` — there are no per-module packages (no `echofit-diet`, `echofit-workout`). Module visibility is controlled at runtime via server config and JWT claims, not at install time. See the README for details on module configuration.
 

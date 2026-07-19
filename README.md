@@ -61,7 +61,7 @@ Start a conversation with your AI assistant and ask it to log food, show your fo
 
 ## HTTP Deployment (multi-user)
 
-For remote access from Claude.ai, mobile, or multiple devices, deploy as an HTTP service. The server uses [mcp-app](https://github.com/krisrowe/mcp-app) for server bootstrapping and user-identity middleware.
+For remote access from Claude.ai, mobile, or multiple devices, deploy as an HTTP service. The server uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstrapping and user-identity middleware.
 
 ### Environment variables
 
@@ -169,6 +169,6 @@ The `[test]` extra pulls in `pytest`, `pytest-asyncio`, and `httpx` — required
 
 ### Dependencies
 
-- [mcp-app](https://github.com/krisrowe/mcp-app) — MCP server framework with user-identity middleware
+- [mcp-app](https://github.com/echomodel/mcp-app) — MCP server framework with user-identity middleware
 - [mcp](https://github.com/modelcontextprotocol/python-sdk) — MCP protocol SDK
 - PyYAML — configuration

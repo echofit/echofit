@@ -295,7 +295,7 @@ python -m pytest
 
 ## Multi-User Auth
 
-EchoFit uses [mcp-app](https://github.com/krisrowe/mcp-app) for server bootstrapping and user-identity middleware. In HTTP mode:
+EchoFit uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstrapping and user-identity middleware. In HTTP mode:
 
 - mcp-app's user-identity middleware validates the JWT and loads the full user record (auth + profile) in one store read, setting the `current_user` ContextVar
 - `FileSystemUserDataStore` provides per-user directory storage

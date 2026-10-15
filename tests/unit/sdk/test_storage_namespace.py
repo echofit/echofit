@@ -57,6 +57,7 @@ def test_domain_data_never_collides_with_reserved_root_key(cloud_env):
     """Logging domain data must not create {user_dir}/user.json (the
     framework's identity record) and must write under a namespace subdir."""
     sdk = WorkoutSDK()
+    sdk.add_exercise("Curls", "Arms")
     sdk.log_workout([{"exercise_name": "Curls", "sets": 2}])
 
     user_dir = get_app_data_dir()

@@ -11,13 +11,14 @@ objects. One file per day makes "recent / range / trend" queries list and
 read O(days). One file per month bounds that to ~12 objects/year — a tiny
 listing plus a couple of reads.
 
-Reads are a **clock-free reverse cursor**. The most recent data is
-*discovered* by listing shard names and taking the largest (shard names are
-sortable ``YYYY-MM`` keys) — never by computing "today", which may be empty.
-The cursor walks backward shard-by-shard, lazily reading, stopping as soon
-as the request is satisfied. A ``max_active_months`` budget caps worst-case
-I/O for queries that can't be satisfied (e.g. "last 5 of an exercise you've
-only done 3 times"), so they don't scan all of history.
+Reads are a **clock-free reverse scan** (:meth:`DailyJournal.scan`). The
+most recent data is *discovered* by listing shard names and taking the
+largest (shard names are sortable ``YYYY-MM`` keys) — never by computing
+"today", which may be empty. The scan walks backward shard-by-shard,
+reading each in-range shard once and filtering rows in memory. A caller
+that only needs the newest N rows passes ``stop_after`` so the walk ends as
+soon as it has them; a caller computing aggregates reads the whole range,
+and an explicit ``since``/``until`` bounds the files touched.
 
 Invariants:
 
@@ -36,7 +37,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +298,57 @@ class DailyJournal:
             result["moved_entries"] = [e.get(self.name_field, "unknown") for e in to_move]
         return result
 
+    # ── name maintenance ────────────────────────────────────────
+
+    def count_names(self) -> Dict[str, int]:
+        """Count entries per distinct ``name_field`` value across all history.
+
+        Keys are the stored spellings (case preserved); reads every shard once.
+        """
+        counts: Dict[str, int] = {}
+        if not self.name_field:
+            return counts
+        for month in self.list_shards():
+            for day in self.load_shard(month).values():
+                for entry in day:
+                    name = entry.get(self.name_field)
+                    if name:
+                        counts[name] = counts.get(name, 0) + 1
+        return counts
+
+    def rename(self, old_name: str, new_name: str) -> Dict[str, Any]:
+        """Rewrite ``name_field`` from ``old_name`` (case-insensitive) to
+        ``new_name`` on every entry in history. Only shards that contain a
+        match are rewritten. Returns the number of entries and shards changed.
+        """
+        if not self.name_field:
+            return {"error": "This journal has no name field."}
+        if not old_name or not new_name:
+            return {"error": "Both old_name and new_name are required."}
+        old_l = old_name.lower()
+        entries_changed = 0
+        shards_changed = 0
+        for month in self.list_shards():
+            shard = self.load_shard(month)
+            touched = False
+            for day in shard.values():
+                for entry in day:
+                    if (entry.get(self.name_field) or "").lower() == old_l \
+                            and entry.get(self.name_field) != new_name:
+                        entry[self.name_field] = new_name
+                        entries_changed += 1
+                        touched = True
+            if touched:
+                self._write_shard(month, shard)
+                shards_changed += 1
+        return {
+            "success": True,
+            "old_name": old_name,
+            "new_name": new_name,
+            "entries_changed": entries_changed,
+            "shards_changed": shards_changed,
+        }
+
     # ── reverse cursor (the read primitive) ─────────────────────
 
     def _select_months(
@@ -335,46 +387,42 @@ class DailyJournal:
             return False
         return (entry.get(self.name_field) or "").lower() == name.lower()
 
-    def query(
+    def scan(
         self,
-        limit: int = 5,
-        unit: str = "sessions",
         name: Optional[str] = None,
         since: Optional[str] = None,
         until: Optional[str] = None,
-        max_active_months: int = 12,
+        match: Optional[Callable[[Dict], bool]] = None,
+        stop_after_dates: Optional[int] = None,
+        max_active_months: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Reverse-chronological cursor read.
+        """Collect matching entries in a range, newest first.
 
-        unit="sessions": the ``limit`` most recent dates with data (each with
-        its entries, filtered by ``name`` when given), most recent first.
-        unit="entries": the ``limit`` most recent individual entries
-        (filtered by ``name``), most recent first, each carrying its ``date``.
+        Each month shard in range is read at most once, newest first; rows
+        are filtered in memory by ``name`` and the optional ``match``
+        predicate, and every returned entry carries its ``date``.
 
-        ``since``/``until`` (inclusive YYYY-MM-DD) bound the range explicitly.
-        ``max_active_months`` caps how many most-recent months-with-data are
-        scanned for open-ended (no since/until) walks, bounding worst-case I/O.
+        ``stop_after_dates`` ends the walk once rows from that many
+        distinct dates (the newest ones, since the walk is descending)
+        have been collected **and** one row from an older date has been
+        seen, so the caller can tell whether more exist. ``0`` stops at the
+        first row. Without it every shard in range is read, which is what
+        period aggregates need. ``max_active_months``
+        defaults to ``None`` (no budget) so an open-ended scan covers all
+        history; a budget makes ``scan_truncated`` report skipped months.
         """
-        if unit not in ("sessions", "entries"):
-            return {"error": "unit must be 'sessions' or 'entries'."}
         for label, d in (("since", since), ("until", until)):
             if d is not None and not self._valid_date(d):
                 return {"error": f"Invalid {label} date: {d}. Use YYYY-MM-DD."}
-        if limit < 0:
-            return {"error": "limit must be non-negative."}
+        if since and until and since > until:
+            return {"error": f"since ({since}) is after until ({until})."}
 
         months, more_beyond = self._select_months(since, until, max_active_months)
-
-        # Collect one past the limit so "has_more" is exact even when the
-        # limit lands on a shard boundary, then trim back to limit.
-        cap = limit + 1
-        collected: List[Dict] = []  # sessions or flat entries depending on unit
+        entries: List[Dict] = []
+        dates_seen: List[str] = []
         oldest_examined: Optional[str] = None
         months_scanned = 0
-
-        def _full() -> bool:
-            return len(collected) >= cap
-
+        done = False
         for month in months:  # already descending
             months_scanned += 1
             oldest_examined = month
@@ -384,47 +432,28 @@ class DailyJournal:
                     continue
                 if until and date_str > until:
                     continue
-                day_entries = shard[date_str]
-                matched = [e for e in day_entries if self._matches(e, name)]
-                if not matched:
-                    continue
-
-                if unit == "sessions":
-                    collected.append(
-                        {
-                            "date": date_str,
-                            "entries": matched,
-                            "total_entries": len(day_entries),
-                        }
-                    )
-                    if _full():
-                        break
-                else:  # entries — newest within a day first
-                    for entry in reversed(matched):
-                        collected.append({**entry, "date": date_str})
-                        if _full():
+                for entry in reversed(shard[date_str]):  # newest-logged first
+                    if not self._matches(entry, name):
+                        continue
+                    if match is not None and not match(entry):
+                        continue
+                    if not dates_seen or dates_seen[-1] != date_str:
+                        dates_seen.append(date_str)
+                        if stop_after_dates is not None and len(dates_seen) > stop_after_dates:
+                            entries.append({**entry, "date": date_str})  # one row past the page
+                            done = True
                             break
-                    if _full():
-                        break
-            if _full():
+                    entries.append({**entry, "date": date_str})
+                if done:
+                    break
+            if done:
                 break
-
-        has_more = len(collected) > limit
-        results = collected[:limit]
-        satisfied = len(results) >= limit
-        # Truncated only if the budget cut off months we never read AND we
-        # still couldn't satisfy the request within the budget.
-        scan_truncated = more_beyond and not satisfied
-
-        result: Dict[str, Any] = {
-            "count": len(results),
-            "has_more": has_more,
+        return {
+            "entries": entries,
             "months_scanned": months_scanned,
             "scanned_through": oldest_examined,
-            "scan_truncated": scan_truncated,
+            "scan_truncated": more_beyond,
         }
-        result["sessions" if unit == "sessions" else "entries"] = results
-        return result
 
     # ── one-time migration ──────────────────────────────────────
 

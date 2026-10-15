@@ -23,7 +23,9 @@ from echofit_mcp.diet.tools import (  # noqa: F401
 # Workout tools
 from echofit_mcp.workout.tools import (  # noqa: F401
     log_workout,
-    get_workout_log,
+    search_workouts,
+    audit_exercise_names,
+    rename_logged_exercise,
     list_exercises,
     add_exercise,
     update_exercise,

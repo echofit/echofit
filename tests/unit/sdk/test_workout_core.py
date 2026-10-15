@@ -109,6 +109,39 @@ def _day(sdk, date):
 
 
 class TestWorkoutLogging:
+    @pytest.fixture(autouse=True)
+    def _catalog(self, sdk):
+        for name, target in (("Bench Press", "Chest"), ("Curls", "Arms"), ("Rows", "Back")):
+            sdk.add_exercise(name, target)
+
+    def test_log_unknown_exercise_is_rejected_before_writing(self, sdk):
+        r = sdk.log_workout([{"exercise_name": "Curls", "sets": 1},
+                             {"exercise_name": "Hammer Curls", "sets": 1}])
+        assert "Hammer Curls" in r["error"]
+        assert r["unknown_exercises"] == ["Hammer Curls"]
+        assert sdk.search_workouts(workouts=1)["count"] == 0
+
+    def test_log_stores_the_catalog_spelling(self, sdk):
+        r = sdk.log_workout([{"exercise_name": "bench press", "sets": 1}])
+        assert _day(sdk, r["date"])[0]["exercise_name"] == "Bench Press"
+
+    def test_revise_to_unknown_exercise_is_rejected(self, sdk):
+        r = sdk.log_workout([{"exercise_name": "Curls", "sets": 1}])
+        bad = sdk.revise_workout_entry(r["ids"][0], {"exercise_name": "Hammer Curls"}, r["date"])
+        assert "unknown_exercises" in bad
+        ok = sdk.revise_workout_entry(r["ids"][0], {"exercise_name": "rows"}, r["date"])
+        assert ok["success"]
+        assert _day(sdk, r["date"])[0]["exercise_name"] == "Rows"
+
+    def test_renaming_a_catalog_exercise_renames_its_log_entries(self, sdk):
+        sdk._journal.append([{"exercise_name": "Curls", "sets": 1}], "2025-01-05")
+        sdk._journal.append([{"exercise_name": "curls", "sets": 1}], "2025-02-05")
+        sdk._journal.append([{"exercise_name": "Rows", "sets": 1}], "2025-02-05")
+        r = sdk.update_exercise("Curls", {"name": "Bicep Curls"})
+        assert r["log_entries_renamed"] == 2
+        assert sdk._journal.count_names() == {"Bicep Curls": 2, "Rows": 1}
+        assert sdk.update_exercise("Bicep Curls", {"name": "Rows"})["error"].startswith("Exercise 'Rows' already exists")
+
     def test_log_workout(self, sdk):
         result = sdk.log_workout([
             {"exercise_name": "Bench Press", "sets": 3, "weight": 135, "max_reps": 7},
@@ -167,72 +200,60 @@ class TestWorkoutLogging:
         assert not (sdk._journal.dir / f"{month}.json").exists()
 
 
-class TestWorkoutCursorReads:
-    """get_workout_log is a clock-free reverse cursor over month shards."""
+class TestWorkoutSearchReads:
+    """search_workouts is a clock-free reverse scan over month shards."""
 
     def _seed(self, sdk):
+        sdk.add_exercise("Curls", "Arms")
+        sdk.add_exercise("Bench", "Chest")
         # Seed entries directly onto known dates spanning two months.
         sdk._journal.append([{"exercise_name": "Curls", "weight": 30, "max_reps": 10}], "2025-03-01")
         sdk._journal.append([{"exercise_name": "Bench", "weight": 135, "max_reps": 5}], "2025-03-10")
         sdk._journal.append([{"exercise_name": "Curls", "weight": 35, "max_reps": 9}], "2025-04-02")
         sdk._journal.append([{"exercise_name": "Curls", "weight": 40, "max_reps": 8}], "2025-04-20")
 
-    def test_sessions_most_recent_first(self, sdk):
+    def test_rows_most_recent_first(self, sdk):
         self._seed(sdk)
-        res = sdk.get_workout_log(limit=10, unit="sessions")
-        dates = [s["date"] for s in res["sessions"]]
-        assert dates == sorted(dates, reverse=True)
-        assert dates[0] == "2025-04-20"
+        res = sdk.search_workouts(workouts=10)
+        dates = [r["date"] for r in res["rows"]]
+        assert dates == ["2025-04-20", "2025-04-02", "2025-03-10", "2025-03-01"]
+        assert res["has_more"] is False
 
-    def test_empty_history_returns_no_sessions(self, sdk):
-        res = sdk.get_workout_log()
+    def test_empty_history_returns_no_rows(self, sdk):
+        res = sdk.search_workouts()
         assert res["count"] == 0
-        assert res["sessions"] == []
+        assert res["rows"] == []
+        assert res["scanned_through"] is None
 
-    def test_sessions_limit_and_has_more(self, sdk):
+    def test_limit_and_has_more(self, sdk):
         self._seed(sdk)
-        res = sdk.get_workout_log(limit=2, unit="sessions")
+        res = sdk.search_workouts(workouts=2)
         assert res["count"] == 2
         assert res["has_more"] is True
 
-    def test_entries_unit_newest_first(self, sdk):
+    def test_recent_read_stops_at_the_newest_shard(self, sdk):
         self._seed(sdk)
-        res = sdk.get_workout_log(limit=3, unit="entries")
-        assert [e["date"] for e in res["entries"]] == ["2025-04-20", "2025-04-02", "2025-03-10"]
-        assert all("date" in e for e in res["entries"])
+        res = sdk.search_workouts(workouts=1)
+        assert res["months_scanned"] == 1
+        assert res["scanned_through"] == "2025-04"
 
-    def test_last_n_of_one_exercise_with_summary(self, sdk):
+    def test_last_n_of_one_exercise(self, sdk):
         self._seed(sdk)
-        res = sdk.get_workout_log(limit=4, unit="entries", exercise="Curls")
-        assert [e["weight"] for e in res["entries"]] == [40, 35, 30]   # 3 curls, newest first
-        s = res["summary"]
-        assert s["n"] == 3
-        assert s["last_weight"] == 40
-        assert s["max_weight"] == 40
-        assert s["avg_weight"] == 35.0
+        res = sdk.search_workouts(exercises=["curls"], workouts=4)
+        assert [r["weight"] for r in res["rows"]] == [40, 35, 30]
+        assert res["filters"]["exercises"] == ["Curls"]
 
-    def test_since_until_window(self, sdk):
+    def test_since_until_window_is_inclusive(self, sdk):
         self._seed(sdk)
-        res = sdk.get_workout_log(unit="sessions", since="2025-03-05", until="2025-04-05")
-        dates = [s["date"] for s in res["sessions"]]
-        assert dates == ["2025-04-02", "2025-03-10"]
+        res = sdk.search_workouts(since="2025-03-10", until="2025-04-02")
+        assert [r["date"] for r in res["rows"]] == ["2025-04-02", "2025-03-10"]
 
-
-class TestScanBudget:
-    def test_truncates_and_reports_when_budget_hit(self, sdk):
-        # Curls only ever done once, long ago; many later months with no curls.
-        sdk._journal.append([{"exercise_name": "Curls", "weight": 30}], "2024-01-15")
-        for m in range(1, 9):  # 2024-05 .. 2024-12 etc — months with only Rows
-            sdk._journal.append([{"exercise_name": "Rows", "sets": 3}], f"2024-{m+4:02d}-10")
-        res = sdk.get_workout_log(limit=5, unit="entries", exercise="Curls", max_active_months=3)
-        assert res["count"] < 5            # could not satisfy
-        assert res["scan_truncated"] is True
-        assert res["months_scanned"] == 3
-
-    def test_no_truncation_flag_when_satisfied(self, sdk):
-        sdk._journal.append([{"exercise_name": "Curls", "weight": 30}], "2025-06-10")
-        res = sdk.get_workout_log(limit=1, unit="entries", exercise="Curls", max_active_months=3)
-        assert res["scan_truncated"] is False
+    def test_todays_workout_is_since_equals_until(self, sdk):
+        self._seed(sdk)
+        today = sdk._journal.today()
+        sdk.log_workout([{"exercise_name": "Curls", "sets": 1, "weight": 30, "max_reps": 10}])
+        res = sdk.search_workouts(since=today, until=today)
+        assert res["count"] == 1 and res["rows"][0]["date"] == today
 
 
 class TestWorkoutMove:

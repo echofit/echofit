@@ -10,9 +10,14 @@ async def log_workout(exercises: List[dict]) -> dict[str, Any]:
     """Log workout exercises. Entries are recorded against today's date
     (using the configured timezone and day-boundary offset).
 
+    Every exercise_name must match an exercise in the catalog
+    (case-insensitive); the call is rejected, with the unknown names
+    listed, before anything is written. Check list_exercises first, and
+    add_exercise for a genuinely new movement.
+
     Args:
         exercises: A list of exercise entries. Each entry should contain:
-            - exercise_name (str): name of the exercise
+            - exercise_name (str): name of the exercise, as in the catalog
             - sets (int): number of sets performed
             - weight (float, optional): weight used in lbs
             - max_reps (int, optional): max reps achieved in any set
@@ -27,46 +32,170 @@ async def log_workout(exercises: List[dict]) -> dict[str, Any]:
     return sdk.log_workout(exercises)
 
 
-async def get_workout_log(
-    limit: int = 5,
-    unit: str = "sessions",
-    exercise: Optional[str] = None,
+async def search_workouts(
     since: Optional[str] = None,
     until: Optional[str] = None,
+    days: Optional[int] = None,
+    exercises: Optional[List[str]] = None,
+    min_weight: Optional[float] = None,
+    max_weight: Optional[float] = None,
+    min_reps: Optional[int] = None,
+    max_reps: Optional[int] = None,
+    workouts: int = 5,
+    sort: Optional[List[Dict[str, str]]] = None,
+    fields: Optional[List[str]] = None,
+    stats: bool = False,
 ) -> dict[str, Any]:
-    """Show the workout log, most recent first.
+    """Search the workout log: the most recent matching workouts, with optional exact stats.
 
-    This always starts from the most recent workout that exists and walks
-    backward — it does not need and should not be given a specific date.
-    Use it for every "show my log" / "what have I been doing" / "my last N
-    <exercise>" question.
+    This is the one tool for reading more than a single entry. Use it for
+    "show my log", "what did I do today / this week", "my last 10 curls",
+    and — with stats=true — for every question that needs numbers over a
+    period: personal records, sets at each weight, how reps moved, how
+    many sessions, "is this the most reps I've done at this weight".
+
+    A WORKOUT is all the sets logged on one calendar day: a morning and
+    an evening visit on the same date are one workout. With filters, a
+    workout is a day with at least one matching row, and the page is
+    every matching row from the `workouts` most recent such days. So
+    "my last 10 curls" means exercises=["Curls"], workouts=10: the ten
+    most recent days you curled, with all the curl rows from each. A page
+    never splits a day.
+
+    A ROW is one logged exercise entry (sets, weight, max_reps, notes),
+    not a single set. Each row also carries est_1rm, an Epley estimated
+    one-rep max (weight × (1 + reps/30), only when weight and reps are
+    present and reps ≤ 12): a score for comparing sets of the SAME
+    exercise across different weight/rep combinations. Never compare
+    est_1rm between different exercises.
+
+    STATS are computed over EVERY matching row in the period, whatever
+    `workouts` is; `workouts` only caps the rows returned. workouts=0 with
+    stats=true is a pure stats call. Without stats, the read is cheap and
+    stops as soon as it has the page.
+
+    Recipes:
+      today's workout:        since=<today>, until=<today>   (or days=1)
+      recent log:             workouts=5                      (the default)
+      last 10 curls:          exercises=["Curls"], workouts=10
+      curls, 6-month review:  exercises=["Curls"], days=180, stats=true, workouts=0
+                              → stats[0].by_weight: sets, min/max reps at each weight
+      all-time PR:            exercises=["Curls"], stats=true, workouts=0
+                              → stats[0].best_est_1rm and by_weight[0]; then, to see
+                              the rows: min_weight=<that weight>, sort=[{"by":"max_reps"}]
+      heaviest sets at 8+:    exercises=["Curls"], min_reps=8, workouts=10,
+                              sort=[{"by":"weight"},{"by":"max_reps"}]
+      everything at 60 lbs:   exercises=["Curls"], min_weight=60, max_weight=60, stats=true
+      what have I trained:    days=30, stats=true, workouts=0   (one stats block per exercise)
+      compact rows:           fields=["date","exercise_name","weight","max_reps"]
+      page further back:      until=<day before oldest_date from the last response>
+      oldest first:           sort=[{"by":"date","dir":"asc"}]  (orders the page; the page is
+                              still the most recent workouts — page back with until)
 
     Args:
-        limit: How many most-recent results to return (default 5).
-        unit: "sessions" returns the most recent dates with data, each with
-            its entries grouped together. "entries" returns the most recent
-            individual entries (newest first), each tagged with its date —
-            use this for "my last 4 curls".
-        exercise: Optional exercise name to filter by (e.g. "Curls"). When
-            given, the result also includes a summary with the count and the
-            average/max weight and reps over the matched entries.
-        since: Optional inclusive start date (YYYY-MM-DD), e.g. for
-            "workouts in the last two weeks" (caller supplies the date).
-        until: Optional inclusive end date (YYYY-MM-DD). Pass the day before
-            the oldest result you've already seen to page further back.
+        since: Inclusive start date (YYYY-MM-DD). With neither since nor
+            days, the whole history is in range.
+        until: Inclusive end date (YYYY-MM-DD).
+        days: The last N calendar days up to today; a shortcut for since.
+            Do not pass both days and since. Not the same as workouts.
+        exercises: Optional list of exercise names, matched to the catalog
+            case-insensitively. A name not in the catalog is an error
+            (call list_exercises to see the catalog). Omit for all.
+        min_weight / max_weight: Inclusive weight bounds (lbs). Rows with
+            no weight are excluded when either is set.
+        min_reps / max_reps: Inclusive bounds on a row's max_reps. Rows
+            with no reps are excluded when either is set.
+        workouts: How many most-recent matching dates to return rows for
+            (default 5). Every matching row on those dates is returned, so
+            count varies. There is no cap, but every row costs context:
+            prefer stats=true for totals and page for detail.
+        sort: Order of the rows in the page: a list of {"by": field,
+            "dir": "asc"|"desc"} applied in order; dir defaults to "desc".
+            Fields: "date", "weight", "max_reps", "sets", "exercise_name",
+            "est_1rm". Missing values sort last; ties fall back to newest
+            first. Default: newest first. sort orders the page; it does
+            not change which workouts are in it (always the most recent),
+            and stats do not depend on it.
+        fields: Which fields to include per row, from "id", "date",
+            "exercise_name", "sets", "weight", "max_reps", "est_1rm",
+            "notes". Default all. Keep "id" if you may revise or remove.
+        stats: True to compute per-exercise aggregates over the full
+            period (reads every month in range once).
 
     Returns:
-        sessions or entries: The results, most recent first.
-        count: How many were returned.
-        has_more: Whether more results exist past this page.
-        scan_truncated: True if the search was capped before fully
-            satisfying the request — tell the user it only looked back
-            through 'scanned_through' and offer to look further.
-        scanned_through: The oldest month examined (YYYY-MM).
+        rows / count: The page's rows and how many.
+        workouts / newest_date / oldest_date: How many dates the page
+            covers and its bounds. oldest_date is the paging cursor.
+        has_more: Older matching workouts exist beyond this page (with
+            stats, they are already counted in the stats). To get them,
+            call again with until = the day before oldest_date. Days are
+            never split across pages, so nothing is skipped or repeated.
+            Notes often say how a weight was counted (per arm vs total,
+            equipment), so read them before comparing weights.
+        period: The since/until actually applied (days resolves to since).
+        With stats=true:
+          total_rows / sessions: Across all exercises in the period.
+          stats: One block per exercise (in the order asked, or most rows
+            first when exercises was omitted) — exercise, total_rows,
+            total_sets, sessions, first_date, last_date, max_weight,
+            max_reps, best_est_1rm {est_1rm, weight, max_reps, date}, and
+            by_weight: one row per distinct weight, heaviest first —
+            weight, sets, rows, min_reps, max_reps, first_date, last_date.
+            by_weight is the full picture: a weight tried once shows up
+            next to the working weight, so say both.
+        months_scanned / scanned_through: How far back the read went.
     """
-    return sdk.get_workout_log(
-        limit=limit, unit=unit, exercise=exercise, since=since, until=until
+    return sdk.search_workouts(
+        since=since, until=until, days=days, exercises=exercises,
+        min_weight=min_weight, max_weight=max_weight,
+        min_reps=min_reps, max_reps=max_reps,
+        workouts=workouts, sort=sort, fields=fields, stats=stats,
     )
+
+
+async def audit_exercise_names() -> dict[str, Any]:
+    """Check that every exercise name in the workout log matches the catalog.
+
+    Every logged entry stores an exercise name, and new entries must match
+    a catalog exercise. This reads the whole log once and reports entries
+    whose stored name is not in the catalog (orphans — typically older
+    entries logged before the check existed, or a spelling variant) and
+    entries whose spelling differs from the catalog's only in case.
+
+    Returns:
+        clean: True when the log and catalog agree completely.
+        orphans: [{exercise_name, entries}] — names with no catalog match,
+            most entries first. Fix with rename_logged_exercise(old_name,
+            new_name) into the right catalog exercise, or add_exercise if
+            the name is genuinely a new exercise.
+        case_mismatches: [{exercise_name, catalog_name, entries}] — same
+            exercise, different capitalisation. Fix the same way.
+        catalog_count / logged_names: Sizes of the two sides.
+    """
+    return sdk.audit_exercise_names()
+
+
+async def rename_logged_exercise(old_name: str, new_name: str) -> dict[str, Any]:
+    """Rewrite every workout log entry named old_name to the catalog exercise new_name.
+
+    Use it to merge an orphaned or misspelled name reported by
+    audit_exercise_names into the correct catalog exercise, or to fold a
+    duplicate exercise into another (then remove_exercise the duplicate).
+    It rewrites history, so confirm with the user first and show them the
+    audit counts.
+
+    Args:
+        old_name: The name as currently stored in the log (case-insensitive).
+            It does not need to be in the catalog.
+        new_name: The catalog exercise to rename to. Must exist in the
+            catalog; entries are stored with the catalog's exact spelling.
+
+    Returns:
+        entries_changed / shards_changed: How many log entries and month
+            files were rewritten. Zero means nothing was stored under
+            old_name.
+    """
+    return sdk.rename_logged_exercise(old_name, new_name)
 
 
 async def list_exercises(
@@ -97,6 +226,11 @@ async def add_exercise(name: str, targets: Optional[str] = None) -> dict[str, An
 
 async def update_exercise(name: str, updates: Dict) -> dict[str, Any]:
     """Update an exercise in the catalog (e.g. rename or change target group).
+
+    Renaming (updates["name"]) also rewrites every log entry that used the
+    old name, so history stays attached to the exercise; the response's
+    log_entries_renamed says how many. Renaming onto a name that already
+    exists is refused — merge with rename_logged_exercise instead.
 
     Args:
         name: Current name of the exercise.

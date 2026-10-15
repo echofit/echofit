@@ -33,7 +33,6 @@ Module toggling is a runtime concern, not a packaging or deployment concern. Eve
 |-------------|---------|---------|
 | `echofit-sdk` | Core library (all modules) | `pip install echofit-sdk` |
 | `echofit-mcp` | MCP server for AI tools | `pipx install echofit-mcp` |
-| `echofit` | CLI | `pipx install echofit` |
 
 ## Local Usage (stdio)
 
@@ -161,7 +160,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, testing conventions, an
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e sdk/ -e 'mcp/[test]' -e cli/
+pip install -e sdk/ -e 'mcp/[test]'
 python -m pytest
 ```
 

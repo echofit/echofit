@@ -2,19 +2,18 @@
 
 ## Architecture
 
-### Three distribution packages, one repo
+### Two distribution packages, one repo
 
 | PyPI package | Import name | Purpose | Depends on |
 |-------------|-------------|---------|------------|
 | `echofit-sdk` | `echofit` | All business logic | — |
 | `echofit-mcp` | `echofit_mcp` | MCP server (AI tool interface) | `echofit-sdk` |
-| `echofit` | `echofit_cli` | CLI | `echofit-sdk` |
 
-**Why three:** A Claude plugin user shouldn't install Click. A developer using the SDK shouldn't install the MCP framework. A CLI user shouldn't install MCP either.
+**Why two:** a developer using the SDK shouldn't have to install the MCP framework. The MCP package carries the server and the `echofit-admin` operator CLI that mcp-app generates; there is no separate end-user CLI.
 
 ### SDK-first
 
-All business logic lives in `sdk/echofit/`. MCP tools and CLI commands are thin wrappers that call SDK methods and return the result.
+All business logic lives in `sdk/echofit/`. MCP tools are thin wrappers that call SDK methods and return the result.
 
 ```
 sdk/echofit/                   # echofit-sdk package
@@ -36,24 +35,20 @@ mcp/echofit_mcp/               # echofit-mcp package
     tools.py                   # Diet MCP tools — thin async wrappers
   workout/
     tools.py                   # Workout MCP tools — thin async wrappers
-
-cli/echofit_cli/               # echofit (CLI) package
-  main.py                      # Click CLI commands
-  cloud.py                     # Cloud deployment utilities
 ```
 
-If you're writing logic in an MCP tool or CLI command, stop and move it to the SDK.
+If you're writing logic in an MCP tool, stop and move it to the SDK.
 
 ### Modules
 
-EchoFit is organized into feature modules within the SDK. Each module has a parallel structure in the MCP and CLI layers:
+EchoFit is organized into feature modules within the SDK. Each module has a parallel structure in the MCP layer:
 
 - `echofit.diet` — diet/nutrition tracking (SDK)
 - `echofit_mcp.diet` — MCP tools for diet (thin wrappers)
 - `echofit.workout` — exercise logging (SDK)
 - `echofit_mcp.workout` — MCP tools for workout (thin wrappers)
 
-Modules do not import each other. They share `echofit.config` and `echofit.context` for user identity and data path resolution. Adding a module = add a subdir in `sdk/echofit/`, add a corresponding subdir in `mcp/echofit_mcp/`, optionally add CLI commands.
+Modules do not import each other. They share `echofit.config` and `echofit.context` for user identity and data path resolution. Adding a module = add a subdir in `sdk/echofit/` and a corresponding subdir in `mcp/echofit_mcp/`.
 
 Workout and diet share a **journal of dated entries** pattern — per-user, append-only adds, id-targeted revise/remove, and move between dates. The workout log is backed by `DailyJournal` (`sdk/echofit/journal.py`): entries are stored one JSON object per **month** (`workouts/YYYY-MM.json`, keyed by date), and every multi-row read goes through one **clock-free reverse scan** (`search_workouts`) that discovers the most recent data and walks backward, filtering by date range, exercise, weight and reps. The page is the N most recent *workouts* (dates with a matching row), never a row count, so a page cannot split a day and paging by date cannot skip rows. A read that only wants the newest workouts stops as soon as it has them; a read with `stats=true` covers the whole range once and computes exact per-exercise aggregates (sets and rep range at each weight, best estimated 1RM), so the agent never has to page through history to answer a numbers question. Exercise names in the log are checked against the catalog on write, stored with the catalog's spelling, and renamed along with the catalog entry, so one exercise's history never splits across spellings. Month-sharding plus the cursor keep recency, range, and per-exercise history efficient on object-store backends (GCS-FUSE), where a directory listing scales with object count and every read is a round-trip: a small month listing plus one or two reads, instead of one file per date. The only full-shard writer is private, so adds can never clobber a day; edits/moves address entries by `id`; and every read/mutation echoes the resolved `date` and authoritative `total_entries` (both server-derived). Health/vitals (e.g., blood pressure tracking) will have different data structures and access patterns — reads are more analytical (trends over time) and writes may not follow the dated-entries model. Be thoughtful about where reuse lives: modules may share a common part of the user-data storage framework at one level while only a subset shares a more specific element — e.g., the dated-entry journal in `DailyJournal`.
 
@@ -61,7 +56,7 @@ All modules ship together in `echofit-sdk` — there are no per-module packages 
 
 ### SDK returns dicts
 
-SDK methods return JSON-serializable dicts. Both MCP tools and CLI commands use the same return values. MCP tools return them directly. CLI formats for humans.
+SDK methods return JSON-serializable dicts, and MCP tools return them directly.
 
 ### User identity and data path resolution
 
@@ -82,8 +77,7 @@ The SDK reads `current_user.get().email` — it never imports MCP or transport-l
 
 1. **SDK first** — implement in `sdk/echofit/<module>/` (e.g., `sdk/echofit/workout/core.py`)
 2. **MCP tools** — add thin async wrappers in `mcp/echofit_mcp/<module>/tools.py`
-3. **CLI commands** (optional) — add a Click command group in `cli/echofit_cli/`
-4. **Tests** — add sociable unit tests for the SDK method(s) in `tests/unit/sdk/`. If the tool references a new SDK method, the framework's `mcp_app.testing.tools.test_sdk_coverage_audit` will fail until a test references that method by name. Framework-owned concerns (auth, admin CLI, app wiring, HTTP health) are verified automatically by `tests/framework/` — do not duplicate them.
+3. **Tests** — add sociable unit tests for the SDK method(s) in `tests/unit/sdk/`. If the tool references a new SDK method, the framework's `mcp_app.testing.tools.test_sdk_coverage_audit` will fail until a test references that method by name. Framework-owned concerns (auth, admin CLI, app wiring, HTTP health) are verified automatically by `tests/framework/` — do not duplicate them.
 
 ## Testing
 
@@ -108,14 +102,10 @@ tests/
     mcp/                       # In-process MCP tool delegation tests
       test_diet_tools.py       # thin-wrapper delegation + SDK-level data segregation
       test_stdio_transport.py  # subprocess `echofit-mcp stdio` JSON-RPC over pipes
-    cli/                       # Echofit CLI tests
-      test_cloud_config.py     # echofit_cli gcloud config helpers
+    cli/                       # Admin CLI tests the framework doesn't cover yet
       test_admin_cli_local.py  # proving-ground revoke test (tracks mcp-app#10)
   integration/                 # Requires real subprocess + port (NEVER default)
     test_echofit_mcp_serve.py  # subprocess `echofit-mcp serve` boot + remote admin CLI flow
-  cloud/                       # Requires cloud deployment (NEVER default)
-    test_in_cloud.py
-    test_admin_cloud_security.py
 ```
 
 ### `tests/framework/` — free tests from mcp-app that verify mission-critical functionality
@@ -140,7 +130,7 @@ Echofit's `tests/framework/` directory contains **free tests against this echofi
 
 **`tests/unit/mcp/`** — In-process MCP transport tests that cover things the framework tests don't. Today this includes `test_diet_tools.py` (thin-wrapper delegation + SDK-level per-user data segregation) and `test_stdio_transport.py` (subprocess stdio via JSON-RPC over pipes — mcp-app's framework tests cover HTTP but not stdio transport). If mcp-app later adds a stdio equivalent, delete the redundant bits.
 
-**`tests/unit/cli/`** — Echofit-specific CLI tests. Today: `test_cloud_config.py` (echofit's own gcloud config helpers, not mcp-app's admin CLI) and `test_admin_cli_local.py` (proving-ground subprocess test for `users revoke` in local mode, which tracks echomodel/mcp-app#10 and which the framework doesn't yet cover — delete this file when mcp-app adds its own revoke verification).
+**`tests/unit/cli/`** — Today only `test_admin_cli_local.py`: a proving-ground subprocess test for `echofit-admin users revoke` in local mode, which tracks echomodel/mcp-app#10 and which the framework doesn't yet cover. Delete this file when mcp-app adds its own revoke verification.
 
 ### Adopting this pattern in a new mcp-app solution
 
@@ -291,7 +281,7 @@ Also isolate every writable path the subprocess might touch — `HOME`, `XDG_CON
 python -m pytest
 ```
 
-`pytest.ini` sets `testpaths = tests/unit tests/framework` and `asyncio_mode = strict`, so the default run covers both echofit's own tests and the free mission-critical tests imported from mcp-app. Integration tests (`tests/integration/`, `tests/cloud/`) are excluded from default runs and require real infrastructure.
+`pytest.ini` sets `testpaths = tests/unit tests/framework` and `asyncio_mode = strict`, so the default run covers both echofit's own tests and the free mission-critical tests imported from mcp-app. Integration tests (`tests/integration/`) are excluded from default runs and bind a real port.
 
 ## Multi-User Auth
 

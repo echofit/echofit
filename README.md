@@ -83,6 +83,7 @@ Any OAuth 2.1 authorization server that MCP clients can register with works. Set
 3. Enable dynamic client registration (or client ID metadata documents) so MCP clients register with the server URL alone. `<issuer>/.well-known/oauth-authorization-server` must list a `registration_endpoint` and `S256` under `code_challenge_methods_supported`.
 4. Put the user's email in access tokens. Some providers (Auth0, for one) only allow that under a namespaced claim name; echofit's convention for those is `https://echofit.ai/email`, and `AUTH_EMAIL_CLAIM` names whatever claim your provider actually writes.
 5. If the issuer needs a default audience to issue JWT (not opaque) access tokens when a client sends `resource` rather than `audience`, set it to the API identifier.
+6. If the provider treats dynamically registered clients as third-party applications that need explicit API access (Auth0 does), grant them default user-delegated access to the API; otherwise sign-in fails before the login page appears.
 
 ### Deploy
 

@@ -9,7 +9,7 @@ description = "EchoFit MCP server — AI tool interface for diet, workout, and h
 requires-python = ">=3.11"
 dependencies = [
     "echofit-sdk",
-    "mcp-app @ git+https://github.com/echomodel/mcp-app.git@f93b70a",
+    "mcp-app @ git+https://github.com/echomodel/mcp-app.git@08e8ee9",
 ]
 
 [project.optional-dependencies]

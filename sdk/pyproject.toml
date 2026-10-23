@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "EchoFit SDK — diet tracking, workout logging, and health monitoring"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp-app @ git+https://github.com/echomodel/mcp-app.git@f93b70a",
+    "mcp-app @ git+https://github.com/echomodel/mcp-app.git@08e8ee9",
     "PyYAML",
 ]
 

@@ -69,6 +69,8 @@ For remote access from Claude.ai, Claude Desktop, mobile, or multiple devices, d
 | `AUTH_ISSUER` | Yes (HTTP) | Startup fails | The identity provider's issuer identifier, exactly as in the access token's `iss` claim (trailing slash included if the issuer uses one) |
 | `ADMIN_EMAILS` | Yes (HTTP) | No administrators; startup warns | Comma-separated emails that may call `/admin`. Each is also admitted as a user on first sign-in, which is how a fresh deployment bootstraps |
 | `AUTH_EMAIL_CLAIM` | No | `email` | Claim that carries the user's email. Issuers that namespace custom claims need the full claim name |
+| `AUTH_ADMISSION` | No | `allowlist` | Who is admitted on first sign-in besides administrators: `allowlist` (registered users only) or `open` (anyone the provider signs in) |
+| `MAX_USERS` | No | Unlimited | With `open` admission, the number of user records past which new sign-ins get `403` |
 | `AUTH_AUDIENCE` | No | Derived from the request `Host` | Value the token's `aud` must contain. Set only when the service is reached by address rather than hostname, or answers on several hostnames |
 | `APP_USERS_PATH` | No | `~/.local/share/echofit/users/` | Per-user data directory. Point it at persistent storage in any durable deployment |
 
@@ -131,7 +133,8 @@ echofit-admin probe
 ### Who can sign in
 
 - Emails in `ADMIN_EMAILS` are admitted on first sign-in and may call `/admin`.
-- Anyone else needs a user record. Register one with an administrator's access token from the identity provider:
+- With `AUTH_ADMISSION=open`, anyone the identity provider signs in is admitted and registered on their first request, until `MAX_USERS` records exist. echofit owns its users' data and needs nothing from them to start, so this is the natural setting for a deployment that anyone with an account may use; the reference `gapp.yaml` sets it with a cap of 25.
+- Under the default `allowlist` policy, anyone else needs a user record first. Register one with an administrator's access token from the identity provider:
 
   ```bash
   curl -X POST https://YOUR-SERVICE-URL/admin/users \
@@ -140,7 +143,7 @@ echofit-admin probe
     -d '{"email": "alice@example.com"}'
   ```
 
-- Everyone else can sign in at the identity provider but gets `403` from the server.
+- Everyone else can sign in at the identity provider but gets `403` from the server: "not registered" under `allowlist`, "not accepting new users" once an open deployment reaches its cap.
 
 Revoking a user deletes the record (`DELETE /admin/users/{email}`); their next request is a `403`. The identity provider owns the tokens themselves.
 

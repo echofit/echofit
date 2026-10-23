@@ -17,5 +17,9 @@ env:
   - name: ADMIN_EMAILS
     secret:
       name: admin-emails
+  - name: AUTH_ADMISSION
+    value: open
+  - name: MAX_USERS
+    value: "25"
   - name: APP_USERS_PATH
     value: "{{SOLUTION_DATA_PATH}}/users"

@@ -311,6 +311,8 @@ The server identifies a caller by the email claim in the access token, named by 
 | `AUTH_ISSUER` | Identity provider issuer, exactly as in the token's `iss` claim (HTTP mode) | required, no default |
 | `ADMIN_EMAILS` | Comma-separated administrator emails; admitted on first sign-in (HTTP mode) | unset — startup warns |
 | `AUTH_EMAIL_CLAIM` | Access-token claim carrying the user's email | `email` |
+| `AUTH_ADMISSION` | `allowlist` (registered users only) or `open` (anyone the provider signs in, up to `MAX_USERS`) | `allowlist` |
+| `MAX_USERS` | Cap on user records under open admission | unlimited |
 | `AUTH_AUDIENCE` | Audience the token must carry; only for deployments reached by address or on several hostnames | derived from the request `Host` |
 | `APP_USERS_PATH` | Base data directory (checked before `ECHOFIT_DATA`; set in cloud deployments by gapp) | unset — `ECHOFIT_DATA` takes over |
 

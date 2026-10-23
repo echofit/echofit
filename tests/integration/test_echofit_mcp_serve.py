@@ -3,43 +3,45 @@ admin CLI remote flow against a real running server.
 
 Lives in `tests/integration/` because these bind a real TCP port
 and spawn long-running processes. Excluded from default unit runs
-by `pytest.ini`'s `testpaths = tests/unit`. Run with
+by `pytest.ini`'s `testpaths`. Run with
 `python -m pytest tests/integration/`.
 
 What these prove:
-  - `echofit-mcp serve` boots uvicorn, loads the ASGI stack, mounts
-    routes, and accepts one successful authenticated request.
-  - `echofit-admin connect <url>` + `users add` + `tokens create`
-    work against a real server over real HTTP — exercising the
-    RemoteAuthAdapter end-to-end, including per-user config
-    persistence in `_save_setup`.
+  - `echofit-mcp serve` boots uvicorn with `AUTH_ISSUER` and
+    `ADMIN_EMAILS` set, mounts the public routes, publishes the
+    protected-resource metadata document, and answers an
+    unauthenticated MCP request with the 401 challenge an MCP client
+    follows to sign in.
+  - `echofit-admin connect <url>` + `health` + `probe` work against a
+    real server over real HTTP, exercising the remote admin client and
+    per-app config persistence in `setup.json`.
 
-Functional HTTP coverage (per-user segregation, auth rejection
-paths, etc.) lives in `tests/unit/mcp/test_http_transport.py` via
-in-process httpx ASGI transport. These tests are intentionally
-minimal smoke — just enough to prove the subprocess-level wiring.
+No token is ever presented here: the server fetches the issuer's keys
+lazily on the first bearer token, so a placeholder issuer is enough
+to prove the front door. Token validation itself is covered in-process
+by the framework suite (`tests/framework/`) against a test issuer.
 
 Pinned to `sys.executable.parent / "<cmd>"` for both binaries — see
 `tests/unit/cli/test_admin_cli_local.py` docstring for the pipx
 interference rationale.
 """
 
+import json
 import os
 import socket
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
-import jwt as pyjwt
 import pytest
 
 
 ECHOFIT_MCP = str(Path(sys.executable).parent / "echofit-mcp")
 ECHOFIT_ADMIN = str(Path(sys.executable).parent / "echofit-admin")
-SIGNING_KEY = "test-signing-key-not-a-real-secret-please-ignore-xx"
+ISSUER = "https://issuer.example.test/"
+OPERATOR = "operator@example.com"
 
 
 def _free_port() -> int:
@@ -60,20 +62,6 @@ def _wait_for_ready(url: str, timeout: float = 10.0) -> None:
             last_error = e
         time.sleep(0.1)
     raise AssertionError(f"server did not become ready at {url}: {last_error}")
-
-
-def _admin_jwt() -> str:
-    now = datetime.now(timezone.utc)
-    return pyjwt.encode(
-        {
-            "sub": "admin",
-            "scope": "admin",
-            "iat": now,
-            "exp": now + timedelta(minutes=5),
-        },
-        SIGNING_KEY,
-        algorithm="HS256",
-    )
 
 
 def _isolated_env(tmp_path: Path, extra: dict | None = None) -> dict:
@@ -102,7 +90,7 @@ def running_server(tmp_path):
     """Spawn echofit-mcp serve on a free port. Yields (base_url, env)."""
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
-    env = _isolated_env(tmp_path, {"SIGNING_KEY": SIGNING_KEY})
+    env = _isolated_env(tmp_path, {"AUTH_ISSUER": ISSUER, "ADMIN_EMAILS": OPERATOR})
 
     proc = subprocess.Popen(
         [ECHOFIT_MCP, "serve", "--host", "127.0.0.1", "--port", str(port)],
@@ -123,29 +111,38 @@ def running_server(tmp_path):
             proc.wait(timeout=2)
 
 
-def test_serve_boots_and_accepts_one_admin_request(running_server):
-    """Minimal smoke: server up, one admin register succeeds."""
+def test_serve_publishes_discovery_and_challenges_anonymous_calls(running_server):
+    """The OAuth front door: public metadata names the issuer and this
+    server's own URL; an anonymous MCP request gets a 401 that points at
+    that metadata."""
     base_url, _env = running_server
+
+    metadata = httpx.get(f"{base_url}/.well-known/oauth-protected-resource", timeout=5.0)
+    assert metadata.status_code == 200, metadata.text
+    doc = metadata.json()
+    assert doc["authorization_servers"] == [ISSUER]
+    assert doc["resource"] == f"{base_url}/"
+
     resp = httpx.post(
-        f"{base_url}/admin/users",
-        json={"email": "smoke@example.com"},
-        headers={"Authorization": f"Bearer {_admin_jwt()}"},
+        f"{base_url}/",
+        json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
+        headers={"Accept": "application/json, text/event-stream"},
         timeout=5.0,
     )
-    assert resp.status_code == 200, f"admin register failed: {resp.status_code} {resp.text}"
-    body = resp.json()
-    assert body["email"] == "smoke@example.com"
-    assert "token" in body
+    assert resp.status_code == 401, f"{resp.status_code} {resp.text}"
+    challenge = resp.headers.get("www-authenticate", "")
+    assert challenge.startswith("Bearer")
+    assert "resource_metadata=" in challenge
 
 
-def test_echofit_admin_remote_connect_add_and_token(running_server, tmp_path):
-    """Full remote admin CLI flow against a live server.
+def test_echofit_admin_remote_connect_health_and_probe(running_server, tmp_path):
+    """Remote admin CLI flow against a live server, no credential involved.
 
     echofit-admin connect <url> → stores setup.json
-    echofit-admin users add alice → POSTs /admin/users, prints token
-    echofit-admin users list → lists via GET /admin/users
+    echofit-admin health → GET /health
+    echofit-admin probe --json → health + discovery + 401 challenge
     """
-    base_url, server_env = running_server
+    base_url, _server_env = running_server
 
     # Separate HOME for the admin CLI — do NOT share the server's
     # XDG state, since connect writes setup.json and we want to
@@ -172,24 +169,13 @@ def test_echofit_admin_remote_connect_add_and_token(running_server, tmp_path):
         )
         return result
 
-    connect = run(["connect", base_url, "--signing-key", SIGNING_KEY])
+    connect = run(["connect", base_url])
     assert base_url in connect.stdout
 
-    add = run(["users", "add", "alice@example.com"])
-    assert "Added: alice@example.com" in add.stdout
-    assert "Token:" in add.stdout
+    health = run(["health"])
+    assert "200" in health.stdout
 
-    listed = run(["users", "list"])
-    assert "alice@example.com" in listed.stdout
-
-    tokens = run(["tokens", "create", "alice@example.com"])
-    assert "alice@example.com" in tokens.stdout
-    # A JWT has three base64url segments joined by dots.
-    assert tokens.stdout.count(".") >= 2
-
-    # NOTE: `echofit-admin health` is intentionally NOT asserted here.
-    # Upstream mcp-app passes /health through JWTMiddleware but does
-    # not register a /health route, so the server currently returns
-    # 404. The admin CLI still reports "healthy (404)" because it
-    # considers any non-5xx response reachable. Worth a separate
-    # upstream bug; not this test's concern.
+    probe = json.loads(run(["probe", "--json"]).stdout)
+    assert probe["oauth"]["status"] == "ok", probe
+    assert probe["oauth"]["issuer"] == ISSUER
+    assert probe["oauth"]["resource"] == f"{base_url}/"

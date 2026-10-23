@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echofit-sdk"
-version = "0.2.1"
+version = "0.3.0"
 description = "EchoFit SDK — diet tracking, workout logging, and health monitoring"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "mcp-app @ git+https://github.com/echomodel/mcp-app.git@v1.0.0",
+    "mcp-app @ git+https://github.com/echomodel/mcp-app.git@f93b70a",
     "PyYAML",
 ]
 

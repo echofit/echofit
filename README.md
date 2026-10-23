@@ -60,76 +60,108 @@ Start a conversation with your AI assistant and ask it to log food, show your fo
 
 ## HTTP Deployment (multi-user)
 
-For remote access from Claude.ai, mobile, or multiple devices, deploy as an HTTP service. The server uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstrapping and user-identity middleware.
+For remote access from Claude.ai, Claude Desktop, mobile, or multiple devices, deploy as an HTTP service. The server uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstrapping and standard MCP authorization: users sign in with your identity provider, the server validates the access tokens it issues, and the server holds no secret of its own.
 
 ### Environment variables
 
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `SIGNING_KEY` | Yes (HTTP) | `dev-key` | JWT signing key |
-| `JWT_AUD` | No | None (skip) | Token audience validation |
-| `APP_USERS_PATH` | No | `~/.local/share/echofit/users/` | Per-user data directory |
+| Variable | Required | If missing | Purpose |
+|----------|----------|------------|---------|
+| `AUTH_ISSUER` | Yes (HTTP) | Startup fails | The identity provider's issuer identifier, exactly as in the access token's `iss` claim (trailing slash included if the issuer uses one) |
+| `ADMIN_EMAILS` | Yes (HTTP) | No administrators; startup warns | Comma-separated emails that may call `/admin`. Each is also admitted as a user on first sign-in, which is how a fresh deployment bootstraps |
+| `AUTH_EMAIL_CLAIM` | No | `email` | Claim that carries the user's email. Issuers that namespace custom claims need the full claim name |
+| `AUTH_AUDIENCE` | No | Derived from the request `Host` | Value the token's `aud` must contain. Set only when the service is reached by address rather than hostname, or answers on several hostnames |
+| `APP_USERS_PATH` | No | `~/.local/share/echofit/users/` | Per-user data directory. Point it at persistent storage in any durable deployment |
 
-### Deploy with gapp
+None of these is a secret. `AUTH_ISSUER` must match the token's `iss` byte for byte; a missing or extra trailing slash is the usual mistake. The startup log line `mcp_app.startup auth` echoes what the server is using.
 
-[gapp](https://github.com/krisrowe/gapp) deploys to Google Cloud Run with infrastructure, secrets, and GCS FUSE data volumes:
+### Identity provider
+
+Any OAuth 2.1 authorization server that MCP clients can register with works. Set it up once per deployment:
+
+1. Create an API (resource) whose identifier is the server's public URL exactly as users type it, trailing slash included (for example `https://YOUR-SERVICE-URL/`). Turn refresh tokens ("offline access") on.
+2. Pick the login method your users should see (Sign in with Google is a common choice) and turn off any you don't use, such as password login.
+3. Enable dynamic client registration (or client ID metadata documents) so MCP clients register with the server URL alone. `<issuer>/.well-known/oauth-authorization-server` must list a `registration_endpoint` and `S256` under `code_challenge_methods_supported`.
+4. Put the user's email in access tokens. Some providers (Auth0, for one) only allow that under a namespaced claim name; echofit's convention for those is `https://echofit.ai/email`, and `AUTH_EMAIL_CLAIM` names whatever claim your provider actually writes.
+5. If the issuer needs a default audience to issue JWT (not opaque) access tokens when a client sends `resource` rather than `audience`, set it to the API identifier.
+
+### Deploy
+
+Any platform that runs a Python process works. The process is one command under the environment variables above:
+
+```bash
+pip install ./sdk ./mcp
+AUTH_ISSUER=https://YOUR-ISSUER/ ADMIN_EMAILS=you@example.com \
+APP_USERS_PATH=/data/users echofit-mcp serve --port 8080
+```
+
+Wrap that in whatever your platform expects (a container image, a systemd unit, a buildpack). Set `AUTH_EMAIL_CLAIM` too if your provider namespaces the email claim. Mount persistent storage at `APP_USERS_PATH`; anything less loses user data on restart. Behind a proxy or load balancer, forward `Host` and `X-Forwarded-Proto` unchanged so the server derives the public URL users type.
+
+**Shortcut: gapp.** [gapp](https://github.com/echomodel/gapp) deploys to Google Cloud Run with infrastructure, secrets, and GCS FUSE data volumes, and this repo carries a reference `gapp.yaml`. gapp has no channel for operator-supplied plain values outside the repo, so the two deployment-specific values are declared as user-provided secrets and set once before the first deploy:
 
 ```bash
 gapp init
 gapp setup <project-id>
+gapp secrets set auth-issuer       # prompts; the issuer URL, trailing slash included
+gapp secrets set admin-emails      # prompts; the comma-separated list
 gapp deploy
 ```
 
-See [gapp documentation](https://github.com/krisrowe/gapp) for details.
+See the [gapp documentation](https://github.com/echomodel/gapp) for details.
 
-### Deploy without gapp
+### Connect the admin CLI
 
-Any platform that runs Python ASGI apps works — Docker, Fly.io, Railway, etc. Set the environment variables above and run with uvicorn or any ASGI server.
-
-### User management
-
-The `echofit-mcp` package ships an `echofit-admin` CLI for registering users, issuing tokens, and checking service health. It talks to the `/admin` REST endpoints on the running server.
+The `echofit-mcp` package ships an `echofit-admin` CLI. Point it at the deployment; the URL is all it needs, and it is saved in `~/.config/echofit/setup.json`:
 
 ```bash
-# Point the admin CLI at your deployment
-echofit-admin connect https://YOUR-SERVICE-URL --signing-key "$SIGNING_KEY"
-
-# Register a user and get their token
-echofit-admin users add alice@example.com
-echofit-admin tokens create alice@example.com
-
-# List / revoke
-echofit-admin users list
-echofit-admin users revoke alice@example.com
-
-# Health check
+echofit-admin connect https://YOUR-SERVICE-URL
 echofit-admin health
 ```
 
-The token printed by `tokens create` is what the end user puts in their MCP client config (see below).
+Against a deployment the CLI supports `connect`, `health`, `probe`, and `register`. `users`, `tools`, and `safe-tool` need a signed-in administrator, which the CLI cannot yet do remotely; they work in full against the local store (`echofit-admin connect local`).
 
-For local development against the filesystem store, use `echofit-admin connect local` instead of a URL.
+### Sanity-check the deployment
 
-### MCP client configuration
-
-**Claude Code / Gemini CLI (Authorization header):**
-```json
-{
-  "mcpServers": {
-    "echofit": {
-      "url": "https://YOUR-SERVICE-URL/",
-      "headers": {
-        "Authorization": "Bearer YOUR_TOKEN"
-      }
-    }
-  }
-}
+```bash
+echofit-admin probe
 ```
 
-**Claude.ai (query param):**
+`probe` hits `/health`, reads the public discovery document at `/.well-known/oauth-protected-resource`, and confirms that an unauthenticated MCP request gets the `401` challenge an MCP client follows to sign in. It must report `OAuth: ok` with the issuer you configured and a `resource` equal to the URL users type. A different `resource` means the front door is rewriting `Host` or dropping `X-Forwarded-Proto`; fix the proxy or pin `AUTH_AUDIENCE`.
+
+### Who can sign in
+
+- Emails in `ADMIN_EMAILS` are admitted on first sign-in and may call `/admin`.
+- Anyone else needs a user record. Register one with an administrator's access token from the identity provider:
+
+  ```bash
+  curl -X POST https://YOUR-SERVICE-URL/admin/users \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"email": "alice@example.com"}'
+  ```
+
+- Everyone else can sign in at the identity provider but gets `403` from the server.
+
+Revoking a user deletes the record (`DELETE /admin/users/{email}`); their next request is a `403`. The identity provider owns the tokens themselves.
+
+### Connect end users
+
+```bash
+echofit-admin register
 ```
-https://YOUR-SERVICE-URL/?token=YOUR_TOKEN
+
+prints the registration command for each MCP client. No command carries a credential, so the same output serves every user; each signs in with their own account on first use.
+
+**Claude Code:**
+```bash
+claude mcp add --transport http -s user echofit https://YOUR-SERVICE-URL/
 ```
+
+**Antigravity CLI (agy):**
+```bash
+agy mcp add echofit https://YOUR-SERVICE-URL/
+```
+
+**Claude.ai, Claude Desktop, and Claude mobile:** Settings → Connectors → Add custom connector, with the URL `https://YOUR-SERVICE-URL/`. The client discovers the issuer from the server URL, registers itself, and opens the sign-in page.
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 
 These tests verify mission-critical operational functionality that the
 mcp-app framework provides to every solution built on it — user auth,
-user admin, JWT enforcement, admin CLI flows, app wiring, HTTP health,
+user admin, OAuth enforcement, admin CLI flows, app wiring, HTTP health,
 and SDK test-coverage auditing. None of them were written in echofit.
 They are imported from `mcp_app.testing.*` and run against echofit's
 `App` object via the `app` fixture in `conftest.py`.

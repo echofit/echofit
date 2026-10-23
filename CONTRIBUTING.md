@@ -67,9 +67,9 @@ User identity flows via `current_user` ContextVar (re-exported from `mcp_app.con
 | Mode | Transport | `current_user.email` | Data path |
 |------|-----------|----------------------|-----------|
 | **Single-user (stdio)** | stdio | `"local"` (set via `--user local`) | `~/.local/share/echofit/` |
-| **Multi-user (HTTP)** | HTTP/SSE | Set from JWT `sub` claim by mcp-app middleware | `~/.local/share/echofit/{user}` (or `APP_USERS_PATH/{user}` in cloud) |
+| **Multi-user (HTTP)** | Streamable HTTP | The email claim of the identity provider's access token (`AUTH_EMAIL_CLAIM`), validated by mcp-app's OAuth middleware | `~/.local/share/echofit/{user}` (or `APP_USERS_PATH/{user}` in cloud) |
 
-In stdio mode, passing `--user local` (or any placeholder email) to `echofit-mcp stdio` sets `current_user` to a `UserRecord(email="local")`, and data goes directly to the base data directory — no user subdirectory. In HTTP mode, mcp-app's user-identity middleware validates the JWT, loads the full user record from the store in one read, and sets `current_user`, which causes `get_app_data_dir()` to return a user-scoped subdirectory.
+In stdio mode, passing `--user local` (or any placeholder email) to `echofit-mcp stdio` sets `current_user` to a `UserRecord(email="local")`, and data goes directly to the base data directory — no user subdirectory. In HTTP mode, mcp-app's OAuth middleware validates the bearer token against the identity provider's published keys, loads the user record for the token's email claim from the store in one read, and sets `current_user`, which causes `get_app_data_dir()` to return a user-scoped subdirectory.
 
 The SDK reads `current_user.get().email` — it never imports MCP or transport-layer code. This means all modules (diet, workout, etc.) get user-scoped data for free without knowing how the user was identified.
 
@@ -91,7 +91,7 @@ Tests verify complete features or SDK transactions end-to-end. No mocks unless n
 tests/
   framework/                   # Free tests against this echofit app sourced from the mcp-app
                                # framework, verifying mission-critical operational functionality
-                               # (user auth, user admin, JWT enforcement) — 26 tests, DEFAULT
+                               # (OAuth enforcement, user admin, app wiring) — DEFAULT
     conftest.py                # Hands the framework your App object
     test_framework.py          # Imports the subsystem test modules mcp-app ships
   unit/                        # Echofit-specific tests (DEFAULT)
@@ -110,16 +110,16 @@ tests/
 
 ### `tests/framework/` — free tests from mcp-app that verify mission-critical functionality
 
-Echofit's `tests/framework/` directory contains **free tests against this echofit app sourced from the mcp-app framework that verify mission-critical operational functionality** — the plumbing mcp-app itself owns and echofit depends on: user auth, user admin, JWT enforcement, admin CLI flows, app wiring, HTTP health, and SDK test-coverage discipline. These tests did not have to be written. They were imported. Twenty-six of them run on every `pytest` invocation, and if any one of them fails, something mission-critical in this solution is broken.
+Echofit's `tests/framework/` directory contains **free tests against this echofit app sourced from the mcp-app framework that verify mission-critical operational functionality** — the plumbing mcp-app itself owns and echofit depends on: OAuth enforcement, user admin, admin CLI flows, app wiring, HTTP health, and SDK test-coverage discipline. These tests did not have to be written. They were imported. All of them run on every `pytest` invocation, and if any one of them fails, something mission-critical in this solution is broken.
 
-**Why this exists at all:** the mcp-app framework provides user management, auth middleware, admin endpoints, and a CLI factory that every mcp-app solution inherits. Those features are mission-critical — if `POST /admin/users` silently stops registering users, or if an expired JWT stops returning 403, or if `echofit-admin connect local` stops writing `setup.json` correctly, echofit is broken in production even though no line of echofit code moved. Echofit alone can't detect those regressions by reading its own business logic tests. The framework has to verify its own features are actually wired up correctly in each solution that uses it. `tests/framework/` is how that verification happens for echofit specifically.
+**Why this exists at all:** the mcp-app framework provides user management, auth middleware, admin endpoints, and a CLI factory that every mcp-app solution inherits. Those features are mission-critical — if `POST /admin/users` silently stops registering users, or if an expired token stops returning 401, or if `echofit-admin connect local` stops writing `setup.json` correctly, echofit is broken in production even though no line of echofit code moved. Echofit alone can't detect those regressions by reading its own business logic tests. The framework has to verify its own features are actually wired up correctly in each solution that uses it. `tests/framework/` is how that verification happens for echofit specifically.
 
 **What each subsystem package verifies in plain terms:**
 
 - **`mcp_app.testing.iam`** — **identity and access management**. Three modules:
-  - `test_auth_enforcement` — your running HTTP server actually enforces auth. Missing token → 401. Unregistered user → 403. Expired token → 403. Non-admin scope on `/admin/users` → 403. Profile data round-trips through admin registration. **This is the group that catches an auth regression before it reaches production.**
-  - `test_admin_local` — your installed `echofit-admin` binary actually talks to the local filesystem user store via real subprocess. `connect local`, `users add`, `users list`, `health`, `tokens create` (rejected in local mode) all behave correctly end-to-end.
-  - `test_admin_errors` — misuse of `echofit-admin` fails loudly and informatively. `users add` without prior `connect` errors clearly. `connect <url>` without `--signing-key` errors. `health` without `connect` errors. If an error path stops erroring, users will quietly generate wrong state.
+  - `test_auth_enforcement` — your HTTP stack actually enforces standard MCP authorization, exercised against a test issuer the framework ships. Public `/health` and the discovery document need no token. Missing token → 401 with the `WWW-Authenticate` challenge. Expired token, or a token issued for another audience → 401. Signed-in but unregistered email → 403. An `ADMIN_EMAILS` entry is admitted on first sign-in; a non-admin is refused on `/admin`. Profile data round-trips through admin registration, and `/admin/safe-tool` returns its versioned envelope. **This is the group that catches an auth regression before it reaches production.**
+  - `test_admin_local` — your installed `echofit-admin` binary actually talks to the local filesystem user store via real subprocess. `connect local`, `users add`, `users list`, `health` all behave correctly end-to-end.
+  - `test_admin_errors` — misuse of `echofit-admin` fails loudly and informatively. `users add` without prior `connect` errors clearly. `connect <url>` saves the connection, but `users` commands against it exit with a not-signed-in message. `health` without `connect` errors. If an error path stops erroring, users will quietly generate wrong state.
 - **`mcp_app.testing.wiring`** — **app and entry-point wiring**. `App.mcp_cli` and `App.admin_cli` are real Click groups with the expected subcommands. Every public MCP tool has a docstring and a return-type annotation (required for the MCP protocol). App name is set. If any of this drifts, the server won't boot and the MCP client won't see valid tool schemas.
 - **`mcp_app.testing.tools`** — **SDK test-coverage audit**. An AST-based auditor that walks every public async tool in `echofit_mcp.diet.tools`, finds every `sdk.<method>(...)` call site, and verifies each method name appears in at least one file under `tests/unit/sdk/`. If a new tool is added that calls a new SDK method without a corresponding unit test, this fails with a structured diagnostic listing the gap. Not fuzzy string matching: the tool-to-method mapping is built by AST walk; only the SDK-test presence check is a substring match, and SDK method names are distinct Python identifiers so collisions can't happen.
 - **`mcp_app.testing.health`** — **HTTP liveness**. Verifies `/health` returns 200 OK so Cloud Run (and any other liveness-check-driven platform) will keep the instance in rotation.
@@ -285,12 +285,21 @@ python -m pytest
 
 ## Multi-User Auth
 
-EchoFit uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstrapping and user-identity middleware. In HTTP mode:
+EchoFit uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstrapping and standard MCP authorization. The server is an OAuth 2.1 resource server: an external identity provider signs users in and issues access tokens, and echofit holds no signing secret and issues no tokens. In HTTP mode:
 
-- mcp-app's user-identity middleware validates the JWT and loads the full user record (auth + profile) in one store read, setting the `current_user` ContextVar
+- mcp-app's OAuth middleware verifies the bearer token's signature against the issuer's published keys (JWKS), checks `iss`, `aud` and `exp`, reads the email claim, and loads that user's record (auth + profile) in one store read, setting the `current_user` ContextVar
+- The audience a token must carry, and the `resource` the public discovery document at `/.well-known/oauth-protected-resource` advertises, are derived from each request's `Host` header, so they match the URL users type without configuration
+- Unauthenticated requests get a `401` whose `WWW-Authenticate` header points at that document, which is how an MCP client finds the issuer and starts sign-in; a valid token for an unregistered email gets a `403`
+- `ADMIN_EMAILS` is the whole admin model: those emails may call `/admin` and are admitted as users on first sign-in. Nothing about admin status is stored
 - `FileSystemUserDataStore` provides per-user directory storage
 - `App.build_asgi()` composes MCP + auth + admin into one ASGI app
 - Admin endpoints live at `/admin` — only MCP tools are visible to end users
+
+Operator-facing steps (identity provider setup, deploying, connecting the admin CLI, probe, registering clients) are in the README. `gapp.yaml` is this repo's reference deployment for one hosting route; the app itself reads only the environment variables below and runs anywhere a Python process does.
+
+### Email claim convention
+
+The server identifies a caller by the email claim in the access token, named by `AUTH_EMAIL_CLAIM`. The framework default is the standard `email` claim, and an operator whose identity provider puts it in access tokens sets nothing. Some providers (Auth0, for one) refuse standard claim names in access tokens and require a namespaced one. For those, echofit's convention is `https://echofit.ai/email`: the name is a label the provider writes and the server compares, nothing fetches it, so any operator on any tenant can use it, and the reference `gapp.yaml` does. It is a convention rather than a code default so that providers which already emit `email` stay at zero configuration; set `AUTH_EMAIL_CLAIM` to whatever your provider actually writes.
 
 ## Environment Variables
 
@@ -299,13 +308,15 @@ EchoFit uses [mcp-app](https://github.com/echomodel/mcp-app) for server bootstra
 | `ECHOFIT_DATA` | Base data directory | `~/.local/share/echofit/` |
 | `ECHOFIT_CONFIG` | Config directory | `~/.config/echofit/` |
 | `ECHOFIT_SETTINGS` | Bootstrap settings file | `~/.config/echofit/settings.json` |
-| `SIGNING_KEY` | JWT signing key (HTTP mode) | required, no default |
-| `JWT_AUD` | Token audience validation | None (skip) |
+| `AUTH_ISSUER` | Identity provider issuer, exactly as in the token's `iss` claim (HTTP mode) | required, no default |
+| `ADMIN_EMAILS` | Comma-separated administrator emails; admitted on first sign-in (HTTP mode) | unset — startup warns |
+| `AUTH_EMAIL_CLAIM` | Access-token claim carrying the user's email | `email` |
+| `AUTH_AUDIENCE` | Audience the token must carry; only for deployments reached by address or on several hostnames | derived from the request `Host` |
 | `APP_USERS_PATH` | Base data directory (checked before `ECHOFIT_DATA`; set in cloud deployments by gapp) | unset — `ECHOFIT_DATA` takes over |
 
 ## Code Conventions
 
-- Python 3.10+
+- Python 3.11+
 - Type hints on public methods
 - Docstrings on MCP tools (user-centric, describe inputs/outputs/behavior)
 - No hardcoded absolute paths — use env vars with XDG fallback

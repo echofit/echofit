@@ -4,10 +4,18 @@ domain: mcp.echofit.ai
 service:
   cmd: echofit-mcp serve
 
+# AUTH_ISSUER and ADMIN_EMAILS are not secrets to the server, but they name
+# this deployment's identity-provider tenant and its administrators. gapp has
+# no channel for operator-supplied plain values outside the repo, so they are
+# supplied through Secret Manager.
 env:
-  - name: SIGNING_KEY
+  - name: AUTH_ISSUER
     secret:
-      name: signing-key
-      generate: true
+      name: auth-issuer
+  - name: AUTH_EMAIL_CLAIM
+    value: "https://echofit.ai/email"
+  - name: ADMIN_EMAILS
+    secret:
+      name: admin-emails
   - name: APP_USERS_PATH
     value: "{{SOLUTION_DATA_PATH}}/users"

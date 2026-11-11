@@ -1,0 +1,1 @@
+web: echofit-mcp serve

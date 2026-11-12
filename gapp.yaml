@@ -1,9 +1,6 @@
 public: true
 domain: mcp.echofit.ai
 
-service:
-  cmd: echofit-mcp serve
-
 # AUTH_ISSUER and ADMIN_EMAILS are not secrets to the server, but they name
 # this deployment's identity-provider tenant and its administrators. gapp has
 # no channel for operator-supplied plain values outside the repo, so they are
